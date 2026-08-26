@@ -1,0 +1,6 @@
+{
+  "music_dir": "/Users/you/Music",
+  "spotify_client_id": "",
+  "spotify_client_secret": "",
+  "ffmpeg_path": "/opt/homebrew/bin/ffmpeg"
+}

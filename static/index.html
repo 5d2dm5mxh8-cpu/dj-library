@@ -1,0 +1,3095 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DJ Library</title>
+<script>
+// Apply the saved (or system) theme before first paint to avoid a flash.
+(function(){
+  let t = null;
+  try { t = localStorage.getItem('djlib_theme'); } catch(e) {}
+  if (t !== 'dark' && t !== 'light') {
+    try { t = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'; } catch(e) { t = 'dark'; }
+  }
+  document.documentElement.setAttribute('data-theme', t);
+})();
+</script>
+<style>
+:root{
+  color-scheme:dark;
+  /* ---- Liquid-glass palette (dark): the aurora glows through translucent chrome ---- */
+  --bg:#0a0a10;
+  --bg-a:rgba(56,226,255,.10);   /* aurora stop 1 */
+  --bg-b:rgba(59,130,246,.14);   /* aurora stop 2 */
+  --bg-c:rgba(191,90,242,.10);   /* aurora stop 3 */
+
+  --surface:rgba(26,26,32,.62);        /* glass chrome */
+  --surface-solid:#1a1a20;             /* opaque fallback (reduced transparency) */
+  --surface2:rgba(48,48,58,.55);       /* raised / hover */
+  --surface3:#2c2c34;
+
+  --glass-hi:rgba(255,255,255,.16);    /* specular top rim */
+  --glass-hi-2:rgba(255,255,255,.05);  /* faint lower rim */
+
+  --chip:rgba(255,255,255,.06);        /* inputs, chips, ghost buttons */
+  --chip-2:rgba(255,255,255,.10);      /* hovered chip */
+  --hover:rgba(255,255,255,.04);       /* row hover */
+  --track:rgba(255,255,255,.13);       /* slider track */
+  --selbar:rgba(22,22,28,.82);         /* floating selection bar */
+  --th-bg:rgba(14,14,18,.70);          /* sticky table header */
+  --modal-bg:rgba(28,28,34,.86);       /* modal material */
+  --scrim:rgba(0,0,0,.5);
+  --row-border:rgba(255,255,255,.05);
+  --dg:rgba(255,255,255,.035);         /* dupe / tool cards */
+  --dgl:rgba(0,0,0,.22);
+  --scroll:rgba(255,255,255,.14);
+  --scroll-2:rgba(255,255,255,.24);
+
+  --border:rgba(255,255,255,.08);
+  --border-strong:rgba(255,255,255,.16);
+
+  --cyan:#38e2ff; --cyan-dim:rgba(56,226,255,.13); --on-accent:#04121a;
+  --red:#ff453a;  --red-dim:rgba(255,69,58,.15);
+  --green:#32d74b;--green-dim:rgba(50,215,75,.13);
+  --yellow:#ffd60a;--yellow-dim:rgba(255,214,10,.14);
+  --purple:#bf5af2;--purple-dim:rgba(191,90,242,.14);
+
+  --text:#f2f2f7; --text2:rgba(242,242,247,.85);
+  --muted:#9a9aa5; --muted2:#6a6a74;
+
+  /* system stacks -- SF Pro / SF Mono on macOS, with graceful fallbacks */
+  --ui:-apple-system,BlinkMacSystemFont,'SF Pro Text','Inter','Segoe UI',system-ui,sans-serif;
+  --mono:ui-monospace,'SF Mono','JetBrains Mono','Fira Mono','Menlo',monospace;
+
+  --r:8px;
+  --shadow-3:0 24px 60px rgba(0,0,0,.55);
+}
+[data-theme="light"]{
+  color-scheme:light;
+  /* ---- Liquid-glass palette (light) ---- */
+  --bg:#e6e9f0;
+  --bg-a:rgba(56,190,255,.30);
+  --bg-b:rgba(88,110,240,.22);
+  --bg-c:rgba(190,110,255,.20);
+
+  --surface:rgba(255,255,255,.60);
+  --surface-solid:#f2f3f7;
+  --surface2:rgba(255,255,255,.85);
+  --surface3:#ffffff;
+
+  --glass-hi:rgba(255,255,255,.95);
+  --glass-hi-2:rgba(0,0,0,.04);
+
+  --chip:rgba(0,0,0,.045);
+  --chip-2:rgba(0,0,0,.08);
+  --hover:rgba(0,0,0,.035);
+  --track:rgba(0,0,0,.14);
+  --selbar:rgba(255,255,255,.88);
+  --th-bg:rgba(255,255,255,.68);
+  --modal-bg:rgba(255,255,255,.92);
+  --scrim:rgba(30,35,50,.25);
+  --row-border:rgba(0,0,0,.05);
+  --dg:rgba(0,0,0,.03);
+  --dgl:rgba(0,0,0,.04);
+  --scroll:rgba(0,0,0,.18);
+  --scroll-2:rgba(0,0,0,.32);
+
+  --border:rgba(0,0,0,.10);
+  --border-strong:rgba(0,0,0,.18);
+
+  --cyan:#0084a0; --cyan-dim:rgba(0,132,160,.12); --on-accent:#ffffff;
+  --red:#d70015;  --red-dim:rgba(215,0,21,.08);
+  --green:#0d9e47;--green-dim:rgba(13,158,71,.12);
+  --yellow:#a47800;--yellow-dim:rgba(164,120,0,.12);
+  --purple:#8a3dd0;--purple-dim:rgba(138,61,208,.12);
+
+  --text:#1a1a1f; --text2:rgba(26,26,31,.82);
+  --muted:#5d5d66; --muted2:#909099;
+
+  --shadow-3:0 24px 60px rgba(40,50,80,.28);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+::selection{background:rgba(56,226,255,.28)}
+:focus-visible{outline:2px solid var(--cyan);outline-offset:2px;border-radius:4px}
+body{
+  color:var(--text);font-family:var(--ui);font-size:14px;-webkit-font-smoothing:antialiased;
+  height:100vh;display:grid;position:relative;
+  grid-template-rows:54px 46px 1fr;
+  grid-template-columns:var(--sidebar-w,288px) 7px 1fr;
+  grid-template-areas:"header header header""filters filters filters""sidebar gutter main";
+  overflow:hidden;
+  /* aurora -- animated colour field behind the glass */
+  background:
+    radial-gradient(1100px 700px at 12% -10%,var(--bg-a),transparent 55%),
+    radial-gradient(1200px 800px at 90% -6%,var(--bg-b),transparent 58%),
+    radial-gradient(900px 700px at 30% 115%,var(--bg-c),transparent 55%),
+    var(--bg);
+  background-size:140% 140%,150% 150%,130% 130%,100% 100%;
+  background-repeat:no-repeat;
+}
+@media (prefers-reduced-motion:no-preference){
+  body{animation:aurora 40s ease-in-out infinite alternate}
+}
+@keyframes aurora{
+  0%{background-position:0% 0%,100% 0%,0% 100%,0 0}
+  50%{background-position:60% 20%,40% 30%,70% 60%,0 0}
+  100%{background-position:20% 40%,80% 10%,30% 80%,0 0}
+}
+
+/* HEADER -- liquid glass; the aurora glows through and the specular rim reads as an edge */
+header{grid-area:header;
+  background-color:var(--surface);
+  background-image:linear-gradient(180deg,var(--glass-hi),transparent 55%);
+  -webkit-backdrop-filter:blur(28px) saturate(180%);backdrop-filter:blur(28px) saturate(180%);
+  border-bottom:1px solid var(--border);
+  box-shadow:inset 0 1px 0 var(--glass-hi),0 1px 24px rgba(0,0,0,.14);
+  display:flex;align-items:center;padding:0 16px;gap:14px}
+.logo{display:flex;align-items:center;gap:10px;font-family:var(--mono);font-size:13px;font-weight:800;
+  letter-spacing:.16em;color:var(--text);text-transform:uppercase;white-space:nowrap;flex-shrink:0}
+.logo::before{content:"";width:22px;height:22px;border-radius:7px;flex-shrink:0;
+  background:linear-gradient(135deg,#38e2ff,#3b82f6);box-shadow:0 2px 10px rgba(56,226,255,.4)}
+.logo span{color:var(--muted2);font-weight:400}
+.search-wrap{flex:1;max-width:420px;position:relative}
+.search-wrap input{width:100%;background:var(--chip);border:1px solid var(--border);
+  border-radius:10px;color:var(--text);font-size:13px;padding:8px 12px 8px 34px;
+  outline:none;transition:border-color .15s,box-shadow .15s,background .15s}
+.search-wrap input::placeholder{color:var(--muted2)}
+.search-wrap input:hover{background:var(--chip-2)}
+.search-wrap input:focus{border-color:var(--cyan);background:var(--chip-2);
+  box-shadow:0 0 0 3px var(--cyan-dim)}
+.search-wrap .si{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--muted);pointer-events:none}
+.track-count{font-family:var(--mono);font-size:11px;color:var(--muted);white-space:nowrap;
+  background:var(--chip);border:1px solid var(--border);border-radius:100px;padding:5px 12px}
+.track-count b{color:var(--cyan)}
+header .rule-sel{background:var(--chip);border:1px solid var(--border);border-radius:9px;
+  color:var(--text);font-family:var(--mono);font-size:11px;padding:7px 10px;outline:none;cursor:pointer;
+  transition:border-color .15s,box-shadow .15s}
+header .rule-sel:hover{border-color:var(--border-strong)}
+header .rule-sel:focus{border-color:var(--cyan);box-shadow:0 0 0 3px var(--cyan-dim)}
+.theme-toggle{width:34px;height:34px;border-radius:10px;flex-shrink:0;cursor:pointer;
+  display:grid;place-items:center;background:var(--chip);border:1px solid var(--border);
+  color:var(--muted);font-size:15px;line-height:1;
+  transition:background .18s,color .18s,transform .18s cubic-bezier(.34,1.56,.64,1),border-color .18s}
+.theme-toggle::before{content:"☾";transform:rotate(-14deg)}
+[data-theme="light"] .theme-toggle::before{content:"☀";transform:rotate(0)}
+.theme-toggle:hover{background:var(--chip-2);color:var(--text);border-color:var(--border-strong);
+  transform:translateY(-1px)}
+.theme-toggle:active{transform:scale(.9)}
+
+/* selection toolbar -- floating glass bar that drops in over the content,
+   so selecting songs never shoves the layout around */
+.selection-bar{
+  position:absolute;top:60px;left:16px;right:16px;z-index:40;
+  display:flex;align-items:center;gap:8px;padding:8px 10px;
+  background-color:var(--selbar);
+  background-image:linear-gradient(180deg,var(--glass-hi),transparent 60%);
+  -webkit-backdrop-filter:blur(22px) saturate(180%);backdrop-filter:blur(22px) saturate(180%);
+  border:1px solid rgba(56,226,255,.32);border-radius:12px;
+  box-shadow:0 10px 32px rgba(0,0,0,.5),inset 0 1px 0 var(--glass-hi);
+  font-family:var(--mono);font-size:11px;color:var(--cyan);
+  opacity:0;transform:translateY(-12px);pointer-events:none;
+  transition:opacity .18s ease,transform .24s cubic-bezier(.34,1.56,.64,1);
+}
+.selection-bar.visible{opacity:1;transform:none;pointer-events:auto}
+.sel-count{font-weight:700;padding:0 6px}
+.btn-sel{background:var(--chip-2);border:1px solid var(--border-strong);color:var(--text2);
+  border-radius:8px;font-family:var(--mono);font-size:10px;padding:5px 11px;
+  cursor:pointer;transition:all .15s}
+.btn-sel:hover{background:var(--cyan-dim);border-color:var(--cyan);color:var(--cyan)}
+.btn-sel:active{transform:scale(.93)}
+.btn-sel-red{border-color:rgba(255,69,58,.5);color:var(--red)}
+.btn-sel-red:hover{background:var(--red-dim);border-color:var(--red);color:var(--red)}
+.btn-clear{background:transparent;border:none;color:var(--muted);cursor:pointer;
+  font-family:var(--mono);font-size:10px;margin-left:auto;padding:5px 8px;
+  border-radius:8px;transition:color .15s}
+.btn-clear:hover{color:var(--text)}
+
+/* FILTER BAR -- translucent glass, content can scroll under it */
+.filter-bar{grid-area:filters;
+  background-color:var(--surface);
+  background-image:linear-gradient(180deg,var(--glass-hi),transparent 50%);
+  -webkit-backdrop-filter:blur(22px) saturate(180%);backdrop-filter:blur(22px) saturate(180%);
+  border-bottom:1px solid var(--border);
+  display:flex;align-items:center;gap:16px;padding:0 16px;overflow-x:auto;scrollbar-width:none}
+.filter-bar::-webkit-scrollbar{display:none}
+.fg{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.fl{font-family:var(--mono);font-size:10px;letter-spacing:.13em;color:var(--muted);
+  text-transform:uppercase;white-space:nowrap}
+.rw{display:flex;align-items:center;gap:6px}
+.rv{font-family:var(--mono);font-size:11px;color:var(--cyan);min-width:32px;text-align:center;
+  font-variant-numeric:tabular-nums}
+input[type=range]{-webkit-appearance:none;appearance:none;width:84px;height:4px;
+  background:var(--track);border-radius:2px;outline:none;cursor:pointer;transition:background .15s}
+input[type=range]:hover{background:var(--border-strong)}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;
+  border-radius:50%;background:#fff;border:2px solid var(--cyan);
+  box-shadow:0 1px 5px rgba(0,0,0,.45);cursor:grab;transition:transform .12s}
+input[type=range]::-webkit-slider-thumb:hover{transform:scale(1.15)}
+input[type=range]::-webkit-slider-thumb:active{cursor:grabbing;transform:scale(1.3)}
+.fdiv{width:1px;height:26px;background:var(--border);flex-shrink:0}
+.key-pills{display:flex;gap:3px;flex-wrap:nowrap;max-width:300px;overflow-x:auto;scrollbar-width:none}
+.key-pills::-webkit-scrollbar{display:none}
+.kp{font-family:var(--mono);font-size:9.5px;padding:4px 8px;border-radius:100px;
+  border:1px solid var(--border);color:var(--muted);cursor:pointer;transition:all .15s;
+  white-space:nowrap;background:transparent}
+.kp:hover{border-color:var(--yellow);color:var(--yellow);background:var(--yellow-dim)}
+.kp.active{background:var(--yellow-dim);border-color:var(--yellow);color:var(--yellow);
+  box-shadow:0 0 0 3px rgba(255,214,10,.1)}
+.gfi{background:var(--chip);border:1px solid var(--border);border-radius:8px;
+  color:var(--text);font-family:var(--mono);font-size:11px;padding:6px 9px;
+  outline:none;width:120px;transition:border-color .15s,box-shadow .15s}
+.gfi::placeholder{color:var(--muted2)}
+.gfi:hover{border-color:var(--border-strong)}
+.gfi:focus{border-color:var(--cyan);box-shadow:0 0 0 3px var(--cyan-dim)}
+.reset-btn{font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.08em;
+  background:var(--red-dim);border:1px solid var(--red);color:var(--red);
+  border-radius:8px;padding:6px 12px;cursor:pointer;transition:all .15s;flex-shrink:0}
+.reset-btn:hover{background:var(--red);color:var(--on-accent)}
+.reset-btn:active{transform:scale(.95)}
+
+/* SIDEBAR -- liquid glass panel, thicker material = structural region */
+aside{grid-area:sidebar;
+  background-color:var(--surface);
+  background-image:linear-gradient(180deg,var(--glass-hi),transparent 40%);
+  -webkit-backdrop-filter:blur(28px) saturate(180%);backdrop-filter:blur(28px) saturate(180%);
+  border-right:1px solid var(--border);
+  box-shadow:inset 1px 0 0 var(--glass-hi-2);
+  display:flex;flex-direction:column;overflow:hidden}
+
+/* SIDEBAR RESIZER -- thin drag strip on the sidebar's right edge. Width is
+   driven by the --sidebar-w custom property on body and persisted in
+   localStorage; double-click resets to the default 288px. */
+.gutter{grid-area:gutter;position:relative;cursor:col-resize;z-index:5}
+.gutter::after{content:"";position:absolute;top:0;bottom:0;left:50%;width:2px;
+  transform:translateX(-50%);background:var(--cyan);opacity:0;transition:opacity .15s}
+.gutter:hover::after,.gutter.dragging::after{opacity:.45}
+.gutter.dragging::after{opacity:.7}
+.sb-sec{padding:16px 16px 18px;border-bottom:1px solid var(--border)}
+.sb-label{font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;color:var(--muted);
+  text-transform:uppercase;margin-bottom:10px}
+.dl-input{width:100%;background:var(--chip);border:1px solid var(--border);
+  border-radius:10px;color:var(--text);font-size:12px;padding:8px 10px;
+  outline:none;resize:none;transition:border-color .15s,box-shadow .15s}
+.dl-input::placeholder{color:var(--muted2)}
+.dl-input:hover{border-color:var(--border-strong)}
+.dl-input:focus{border-color:var(--cyan);box-shadow:0 0 0 3px var(--cyan-dim)}
+.folder-row{display:flex;gap:8px;margin-top:10px}
+.fi{flex:1;background:var(--chip);border:1px solid var(--border);border-radius:8px;
+  color:var(--text);font-family:var(--mono);font-size:12px;padding:8px 10px;
+  outline:none;min-width:0;transition:border-color .15s,box-shadow .15s}
+.fi::placeholder{color:var(--muted2)}
+.fi:hover{border-color:var(--border-strong)}
+.fi:focus{border-color:var(--cyan);box-shadow:0 0 0 3px var(--cyan-dim)}
+.btn{background:var(--cyan);color:var(--on-accent);border:none;border-radius:8px;
+  font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.06em;
+  padding:7px 14px;cursor:pointer;transition:all .15s;white-space:nowrap;
+  box-shadow:0 2px 10px rgba(56,226,255,.28)}
+.btn:hover{opacity:.92;transform:translateY(-.5px)}
+.btn:active{transform:scale(.94)}
+.sp{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10.5px;
+  padding:4px 10px;border-radius:100px;margin-top:8px}
+.sp.downloading{background:var(--cyan-dim);color:var(--cyan)}
+.sp.success{background:var(--green-dim);color:var(--green)}
+.sp.duplicate{background:var(--yellow-dim);color:var(--yellow)}
+.sp.failed{background:var(--red-dim);color:var(--red)}
+.sp.hidden{display:none}
+.dot{width:6px;height:6px;border-radius:50%;background:currentColor;flex-shrink:0}
+.dot.pulse{animation:pulse 1.1s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+
+/* nav tabs in sidebar */
+.sb-tabs{display:flex;gap:2px;padding:6px 10px 0;border-bottom:1px solid var(--border)}
+.sb-tab{flex:1;font-family:var(--mono);font-size:10.5px;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--muted);background:transparent;border:none;
+  padding:10px 6px 12px;cursor:pointer;transition:color .15s;border-bottom:2px solid transparent;border-radius:0}
+.sb-tab:hover{color:var(--text2)}
+.sb-tab.active{color:var(--cyan);border-bottom-color:var(--cyan)}
+.sb-panel{display:none;flex:1;overflow-y:auto}
+.sb-panel.active{display:flex;flex-direction:column}
+.sb-panel::-webkit-scrollbar{width:6px}
+.sb-panel::-webkit-scrollbar-thumb{background:var(--scroll);border-radius:3px}
+
+/* folder/crate list */
+.nav-list{display:flex;flex-direction:column;gap:2px;padding:12px}
+.nav-item{background:transparent;border:none;color:var(--muted);font-family:var(--mono);
+  font-size:11.5px;padding:8px 10px;border-radius:8px;cursor:pointer;
+  text-align:left;transition:all .15s;display:flex;align-items:center;
+  justify-content:space-between;gap:6px}
+.nav-item:hover{background:var(--chip);color:var(--text)}
+.nav-item.active{background:var(--cyan-dim);color:var(--cyan)}
+.nav-item-label{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nav-item-del,.nav-item-sync{opacity:0;font-size:11px;color:var(--muted);cursor:pointer;
+  background:transparent;border:none;padding:2px 4px;border-radius:5px;transition:all .12s;flex-shrink:0}
+.nav-item:hover .nav-item-del,.nav-item:hover .nav-item-sync{opacity:1}
+.nav-item-del:hover{color:var(--red);background:var(--red-dim)}
+.nav-item-sync:hover{color:#1ed760;background:rgba(30,215,96,.12)}
+.crate-badge{font-size:9px;padding:2px 6px;border-radius:100px;
+  border:1px solid rgba(191,90,242,.45);color:var(--purple);flex-shrink:0}
+
+.btn-ghost{background:var(--chip);color:var(--text2);border:1px solid var(--border);
+  border-radius:9px;font-family:var(--mono);font-size:11.5px;
+  padding:9px 12px;cursor:pointer;transition:all .15s;width:100%;margin-bottom:4px}
+.btn-ghost:hover{border-color:var(--cyan);color:var(--cyan);background:var(--cyan-dim)}
+.btn-ghost:active{transform:scale(.98)}
+.spotify-connect{display:flex;align-items:center;gap:8px;padding:9px 11px;
+  background:rgba(30,215,96,.09);border:1px solid rgba(30,215,96,.35);
+  border-radius:10px;margin-bottom:10px}
+.spotify-dot{width:8px;height:8px;border-radius:50%;background:#1ed760;flex-shrink:0;
+  box-shadow:0 0 8px rgba(30,215,96,.55)}
+.spotify-dot.off{background:var(--muted2);box-shadow:none}
+.spotify-text{font-family:var(--mono);font-size:10.5px;color:var(--green);flex:1}
+.spotify-text.off{color:var(--muted)}
+.spotify-btn{font-family:var(--mono);font-size:10.5px;background:#1ed760;color:#04120a;
+  border:none;border-radius:7px;padding:5px 11px;cursor:pointer;font-weight:700;
+  white-space:nowrap;transition:all .15s}
+.spotify-btn:hover{opacity:.9}
+.spotify-btn:active{transform:scale(.95)}
+.dupe-count{font-family:var(--mono);font-size:22px;font-weight:700;color:var(--red);
+  margin-bottom:2px;font-variant-numeric:tabular-nums}
+.dupe-sub{font-size:11.5px;color:var(--muted);margin-bottom:8px}/* MAIN TABLE -- rows scroll underneath the sticky glass header and blur as they pass */
+main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width:0}
+.song-list{flex:1;overflow-y:auto;position:relative;scrollbar-width:thin;
+  scrollbar-color:var(--scroll) transparent}
+.song-list::-webkit-scrollbar{width:6px}
+.song-list::-webkit-scrollbar-track{background:transparent}
+.song-list::-webkit-scrollbar-thumb{background:var(--scroll);border-radius:3px}
+.song-list::-webkit-scrollbar-thumb:hover{background:var(--scroll-2)}
+
+.table-header{
+  position:sticky;top:0;z-index:5;
+  display:grid;
+  grid-template-columns:var(--row-grid, 20px 32px 1fr 100px 58px 64px 60px 56px 72px);
+  padding:0 14px;height:36px;align-items:center;
+  background-color:var(--th-bg);
+  background-image:linear-gradient(180deg,var(--glass-hi),transparent 60%);
+  -webkit-backdrop-filter:blur(20px) saturate(180%);backdrop-filter:blur(20px) saturate(180%);
+  border-bottom:1px solid var(--border);
+  box-shadow:inset 0 1px 0 var(--glass-hi);
+}
+.col{font-family:var(--mono);font-size:10px;letter-spacing:.09em;color:var(--muted);
+  text-transform:uppercase;cursor:pointer;display:flex;align-items:center;gap:3px;
+  user-select:none;transition:color .15s;position:relative}
+.col-resize{position:absolute;right:-3px;top:0;width:8px;height:100%;cursor:col-resize;
+  z-index:3;touch-action:none}
+.col-resize::before{content:'';position:absolute;left:3px;top:18%;bottom:18%;width:1px;
+  background:var(--border-strong);opacity:.7;transition:background .12s}
+.col-resize:hover::before,.col-resize:active::before,.col-resize.zooming::before{background:var(--cyan)}
+.fit-all{background:var(--chip);border:1px solid var(--border);color:var(--muted);
+  border-radius:7px;font-family:var(--mono);font-size:9px;padding:3px 7px;
+  cursor:pointer;transition:all .15s;white-space:nowrap}
+.fit-all:hover{border-color:var(--cyan);color:var(--cyan);background:var(--cyan-dim)}
+.fit-all:active{transform:scale(.95)}
+.col:hover{color:var(--text)}
+.col.sorted{color:var(--cyan)}
+.col.ns{cursor:default}.col.ns:hover{color:var(--muted)}
+.col.draggable{cursor:grab}
+.col.draggable:active{cursor:grabbing}
+.col.dragging{opacity:.35}
+.col.drag-over{background:var(--cyan-dim);box-shadow:inset 0 0 0 1px var(--cyan)}
+.sa{font-size:9px;opacity:.75}
+#songRows{min-height:100%;display:flex;flex-direction:column}
+
+.song-row{
+  display:grid;
+  grid-template-columns:var(--row-grid, 20px 32px 1fr 100px 58px 64px 60px 56px 72px);
+  padding:0 14px;height:46px;align-items:center;
+  border-bottom:1px solid var(--row-border);
+  transition:background .12s;cursor:pointer;
+}
+.song-row:hover{background:var(--hover)}
+.song-row:active{background:var(--cyan-dim)}
+.song-row.selected{background:var(--cyan-dim)}
+.song-row:hover .row-acts,.song-row.selected .row-acts{opacity:1;transform:none}
+
+/* checkbox */
+.row-cb{width:15px;height:15px;border:1.5px solid var(--border-strong);border-radius:5px;
+  cursor:pointer;display:flex;align-items:center;justify-content:center;
+  transition:all .15s;flex-shrink:0;position:relative}
+.song-row:hover .row-cb{border-color:var(--cyan)}
+.song-row.selected .row-cb{background:var(--cyan);border-color:var(--cyan);
+  box-shadow:0 0 0 3px var(--cyan-dim)}
+.song-row.selected .row-cb::after{
+  content:"";
+  position:absolute;
+  left:4.5px;top:2px;width:4px;height:7.5px;
+  border:2px solid var(--on-accent);border-top:none;border-left:none;
+  transform:rotate(45deg);
+}
+
+.si2{font-family:var(--mono);font-size:11px;color:var(--muted2)}
+.sinfo{min-width:0}
+.stitle{font-size:13px;font-weight:500;letter-spacing:-.01em;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;color:var(--text)}
+.sartist{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;margin-top:1px}
+.gc{font-family:var(--mono);font-size:10px;color:var(--purple);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;cursor:text;padding:2px 6px;border-radius:5px;
+  transition:background .12s;min-width:20px;background:var(--purple-dim)}
+.gc:hover{background:rgba(191,90,242,.18)}
+.gc.empty{color:var(--muted2);background:transparent}
+.gc.empty:hover{color:var(--muted)}
+.ge{font-family:var(--mono);font-size:10px;color:var(--purple);background:var(--surface3);
+  border:1px solid var(--purple);border-radius:5px;padding:2px 4px;outline:none;width:100%}
+.sbpm{font-family:var(--mono);font-size:12px;font-weight:600;color:var(--cyan);
+  font-variant-numeric:tabular-nums}
+.skey{font-family:var(--mono);font-size:11px;color:var(--yellow)}
+.sdur{font-family:var(--mono);font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+.row-acts{opacity:0;display:flex;align-items:center;justify-content:flex-end;gap:4px;
+  transform:translateX(5px);transition:opacity .15s,transform .18s}
+.show-btn{background:var(--chip);border:1px solid var(--border);color:var(--text2);
+  cursor:pointer;font-size:10px;font-family:var(--mono);padding:4px 8px;
+  border-radius:6px;transition:all .15s}
+.show-btn:hover{border-color:var(--cyan);color:var(--cyan);background:var(--cyan-dim)}
+.show-btn:active{transform:scale(.95)}
+.del-btn{background:transparent;border:none;color:var(--red);cursor:pointer;
+  font-size:13px;padding:3px 6px;border-radius:6px;transition:background .12s}
+.del-btn:hover{background:var(--red-dim)}
+.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;
+  flex:1;gap:10px;color:var(--muted)}
+.empty-icon{font-size:36px;margin-bottom:4px;opacity:.45}
+
+/* MODALS -- liquid glass sheets that arrive with springy physics + a sheen sweep */
+.modal-bd{display:none;position:fixed;inset:0;background:var(--scrim);
+  -webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);
+  z-index:100;align-items:center;justify-content:center;padding:24px}
+.modal-bd.open{display:flex;animation:scrimIn .22s ease}
+@keyframes scrimIn{from{opacity:0}to{opacity:1}}
+.modal{position:relative;
+  background-color:var(--modal-bg);
+  background-image:linear-gradient(180deg,var(--glass-hi),transparent 26%);
+  -webkit-backdrop-filter:blur(36px) saturate(180%);backdrop-filter:blur(36px) saturate(180%);
+  border:1px solid var(--border-strong);border-radius:18px;
+  width:580px;max-height:86vh;display:flex;flex-direction:column;overflow:hidden;
+  box-shadow:var(--shadow-3),inset 0 1px 0 var(--glass-hi);
+  animation:modalIn .4s cubic-bezier(.34,1.56,.64,1)}
+.modal::after{content:"";position:absolute;inset:0;pointer-events:none;border-radius:inherit;
+  background:linear-gradient(115deg,transparent 34%,rgba(255,255,255,.13) 48%,transparent 62%);
+  transform:translateX(-120%)}
+[data-theme="light"] .modal::after{
+  background:linear-gradient(115deg,transparent 34%,rgba(0,0,0,.07) 48%,transparent 62%)}
+.modal-bd.open .modal::after{animation:sheen 1s ease .2s}
+@keyframes sheen{to{transform:translateX(120%)}}
+.modal-w{width:680px}
+@keyframes modalIn{from{opacity:0;transform:scale(.96) translateY(14px)}to{opacity:1;transform:none}}
+.mhdr{padding:18px 22px 14px;border-bottom:1px solid var(--border);
+  display:flex;align-items:center;justify-content:space-between;gap:10px}
+.mtitle{font-family:var(--mono);font-size:13px;letter-spacing:.04em;font-weight:700}
+.mclose{background:var(--chip);border:none;color:var(--muted);cursor:pointer;
+  font-size:11px;line-height:1;width:28px;height:28px;border-radius:8px;
+  display:grid;place-items:center;transition:all .15s;flex-shrink:0}
+.mclose:hover{background:var(--chip-2);color:var(--text)}
+.mclose:active{transform:scale(.92)}
+.mbody{padding:16px 22px;overflow-y:auto;flex:1}
+
+/* info panel */
+.ig{display:grid;grid-template-columns:96px 1fr;gap:10px 12px;align-items:center}
+.il{font-family:var(--mono);font-size:11px;color:var(--muted);text-align:right}
+.ii{background:var(--chip);border:1px solid var(--border);border-radius:8px;
+  color:var(--text);font-size:12px;padding:7px 9px;outline:none;width:100%;
+  transition:border-color .15s,box-shadow .15s}
+.ii::placeholder{color:var(--muted2)}
+.ii:hover{border-color:var(--border-strong)}
+.ii:focus{border-color:var(--cyan);box-shadow:0 0 0 3px var(--cyan-dim)}
+.ipath{font-family:var(--mono);font-size:10px;color:var(--muted);word-break:break-all;line-height:1.6}
+.iacts{display:flex;gap:8px;justify-content:flex-end;padding:14px 22px;
+  border-top:1px solid var(--border);background:var(--hover)}
+.btn-save{background:var(--cyan);color:var(--on-accent);border:none;border-radius:9px;
+  font-family:var(--mono);font-size:11px;font-weight:700;padding:8px 18px;
+  cursor:pointer;transition:all .15s;box-shadow:0 2px 10px rgba(56,226,255,.25)}
+.btn-save:hover{opacity:.92;transform:translateY(-.5px)}
+.btn-save:active{transform:scale(.95)}
+.batch-note{font-family:var(--mono);font-size:10px;color:var(--yellow);
+  padding:8px 0;margin-bottom:8px}
+
+/* folder picker */
+.fpath{font-family:var(--mono);font-size:11px;color:var(--muted);display:flex;flex-wrap:wrap;gap:3px;align-items:center;margin:12px 0 8px}
+.fpath .seg{cursor:pointer;color:var(--cyan);padding:1px 5px;border-radius:5px}
+.fpath .seg:hover{background:var(--cyan-dim)}
+.froots{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.froot{background:var(--chip);border:1px solid var(--border);border-radius:8px;color:var(--text2);
+  font-family:var(--mono);font-size:10px;padding:4px 9px;cursor:pointer;transition:all .15s}
+.froot:hover{border-color:var(--border-strong);color:var(--text)}
+.flist{display:flex;flex-direction:column;gap:2px;max-height:38vh;overflow-y:auto;padding-bottom:6px}
+.fitem{display:flex;align-items:center;gap:9px;padding:7px 10px;border-radius:8px;cursor:pointer;
+  color:var(--text2);font-size:12px;transition:background .12s,color .12s}
+.fitem:hover{background:var(--hover);color:var(--text)}
+.fitem .fico{opacity:.75;flex-shrink:0}
+.fitem .faudio{margin-left:auto;font-size:10px;color:var(--green);font-family:var(--mono);flex-shrink:0}
+.fitem .fsub{font-size:10px;color:var(--muted);margin-left:auto;text-align:right;flex-shrink:0}
+.fempty{font-size:12px;color:var(--muted);padding:18px 6px;text-align:center}
+.fnote{font-size:10px;color:var(--muted);margin-top:2px}
+
+/* smart crate builder */
+.rule-row{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+.rule-sel{background:var(--chip);border:1px solid var(--border);border-radius:8px;
+  color:var(--text);font-family:var(--mono);font-size:11px;padding:6px 8px;outline:none;cursor:pointer;
+  transition:border-color .15s,box-shadow .15s}
+.rule-sel:hover{border-color:var(--border-strong)}
+.rule-sel:focus{border-color:var(--cyan);box-shadow:0 0 0 3px var(--cyan-dim)}
+.rule-inp{background:var(--chip);border:1px solid var(--border);border-radius:8px;
+  color:var(--text);font-family:var(--mono);font-size:11px;padding:6px 8px;
+  outline:none;flex:1;transition:border-color .15s,box-shadow .15s}
+.rule-inp::placeholder{color:var(--muted2)}
+.rule-inp:hover{border-color:var(--border-strong)}
+.rule-inp:focus{border-color:var(--cyan);box-shadow:0 0 0 3px var(--cyan-dim)}
+.rule-del{background:transparent;border:none;color:var(--red);cursor:pointer;font-size:14px;
+  width:26px;height:26px;border-radius:6px;transition:background .12s}
+.rule-del:hover{background:var(--red-dim)}
+
+/* dupe */
+.dg{margin-bottom:12px;background:var(--dg);border-radius:12px;
+  overflow:hidden;border:1px solid var(--border)}
+.dgl{padding:9px 12px;font-family:var(--mono);font-size:10px;letter-spacing:.1em;
+  color:var(--muted);background:var(--dgl);text-transform:uppercase;
+  display:flex;align-items:center;gap:8px}
+.dbadge{padding:2px 7px;border-radius:100px;font-size:9px;font-weight:700}
+.dbadge.exact{background:var(--red-dim);color:var(--red)}
+.dbadge.fuzzy{background:var(--yellow-dim);color:var(--yellow)}
+.dbadge.name{background:var(--purple-dim);color:var(--purple)}
+#mergePickGo:disabled{opacity:.45;cursor:default;box-shadow:none}
+#mergePickList .df:first-child{border-top:none}
+.df{display:flex;align-items:center;justify-content:space-between;
+  padding:9px 12px;border-top:1px solid var(--border);gap:8px}
+.df:hover{background:var(--hover)}
+.dfi{flex:1;min-width:0}
+.dfn{font-family:var(--mono);font-size:11px;color:var(--text);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dfm{font-size:10px;color:var(--muted);margin-top:2px}
+.dfa{display:flex;gap:5px;flex-shrink:0}
+.br{background:var(--chip);border:1px solid var(--border);color:var(--text2);
+  border-radius:7px;font-family:var(--mono);font-size:10px;padding:4px 8px;
+  cursor:pointer;transition:all .15s}
+.br:hover{border-color:var(--cyan);color:var(--cyan);background:var(--cyan-dim)}
+.br:active{transform:scale(.95)}
+.bdd{background:var(--red-dim);border:1px solid var(--red);color:var(--red);
+  border-radius:7px;font-family:var(--mono);font-size:10px;padding:4px 10px;
+  cursor:pointer;transition:all .15s}
+.bdd:hover{background:var(--red);color:var(--on-accent)}
+.bdd:active{transform:scale(.95)}
+.bdm{background:var(--green-dim);border:1px solid var(--green);color:var(--green);
+  border-radius:7px;font-family:var(--mono);font-size:10px;padding:4px 10px;
+  cursor:pointer;transition:all .15s;margin-left:auto;text-transform:none}
+.bdm:hover{background:var(--green);color:var(--on-accent)}
+.bdm:active{transform:scale(.95)}
+
+/* ---- TRANSITIONS -- links between songs (info modal + sidebar tab) ---- */
+.ts-hdr{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:4px}
+.ts-title{font-family:var(--mono);font-size:11px;letter-spacing:.1em;color:var(--cyan);
+  text-transform:uppercase;font-weight:700}
+.ts-group-label{font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--muted2);margin:12px 0 6px}
+.ts-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:10px;
+  background:var(--dg);border:1px solid var(--border);margin-bottom:6px;
+  transition:background .12s,border-color .12s}
+.ts-row:hover{background:var(--hover);border-color:var(--border-strong)}
+.ts-arrow{font-family:var(--mono);font-size:12px;color:var(--cyan);flex-shrink:0;
+  width:16px;text-align:center;user-select:none}
+.ts-arrow.in{color:var(--purple)}
+.ts-info{flex:1;min-width:0}
+.ts-name{font-family:var(--mono);font-size:11.5px;color:var(--text);display:flex;
+  align-items:center;gap:6px;min-width:0;overflow:hidden}
+.ts-name .ts-click{cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ts-name .ts-click:hover{color:var(--cyan)}
+.ts-artist{color:var(--muted);font-size:10px;flex-shrink:0}
+.ts-tag{font-size:9px;padding:1px 7px;border-radius:100px;background:var(--yellow-dim);
+  color:var(--yellow);border:1px solid rgba(255,214,10,.35);flex-shrink:0;white-space:nowrap}
+.ts-notlib{font-size:9px;padding:1px 7px;border-radius:100px;background:var(--purple-dim);
+  color:var(--purple);border:1px solid rgba(191,90,242,.4);flex-shrink:0;white-space:nowrap}
+.ts-notes{font-size:10.5px;color:var(--muted);margin-top:3px;line-height:1.45;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ts-acts{display:flex;gap:2px;flex-shrink:0}
+.ts-act{background:transparent;border:none;color:var(--muted);cursor:pointer;font-size:12px;
+  width:26px;height:26px;border-radius:7px;display:grid;place-items:center;transition:all .12s}
+.ts-act:hover{background:var(--chip-2);color:var(--text)}
+.ts-act.del:hover{background:var(--red-dim);color:var(--red)}
+.ts-edit{flex:1;min-width:0;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.ts-empty{font-family:var(--mono);font-size:10.5px;color:var(--muted2);padding:4px 2px;line-height:1.5}
+
+/* transitions sidebar tab */
+.ts-tab-group{margin-bottom:14px}
+.ts-tab-src{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11.5px;
+  color:var(--cyan);cursor:pointer;padding:5px 6px;border-radius:8px;transition:background .12s}
+.ts-tab-src:hover{background:var(--cyan-dim)}
+.ts-tab-count{font-size:9px;padding:1px 7px;border-radius:100px;background:var(--cyan-dim);
+  color:var(--cyan);flex-shrink:0}
+.ts-tab-row{display:flex;align-items:center;gap:8px;padding:6px 8px 6px 20px;border-radius:8px;
+  color:var(--text2);font-family:var(--mono);font-size:11px;transition:background .12s}
+.ts-tab-row:hover{background:var(--hover)}
+.ts-tab-target{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}
+.ts-tab-target:hover{color:var(--cyan)}
+.ts-tab-target.noclick{cursor:default;font-style:italic}
+.ts-tab-target.noclick:hover{color:var(--text2)}
+
+/* brief highlight pulse when jumpToSong lands on a row */
+.song-row.flash{animation:rowFlash 1.3s ease}
+@keyframes rowFlash{0%{background:var(--cyan-dim);box-shadow:inset 0 0 0 1px var(--cyan)}60%{background:var(--cyan-dim)}100%{background:transparent;box-shadow:none}}
+
+/* ---- TOOLS TAB: option cards + iOS-style switches ---- */
+.tool-card{background:var(--dg);border:1px solid var(--border);border-radius:14px;
+  overflow:hidden}
+.tool-opt{display:flex;align-items:center;gap:12px;padding:11px 13px}
+.tool-opt+.tool-opt{border-top:1px solid var(--row-border)}
+.tool-opt-text{flex:1;min-width:0}
+.tool-opt-name{font-size:12px;font-weight:500;color:var(--text);line-height:1.35}
+.tool-opt-desc{font-size:10.5px;color:var(--muted);margin-top:2px;line-height:1.45}
+.tool-hint{font-family:var(--mono);font-size:10.5px;color:var(--muted);line-height:1.55}
+.switch{position:relative;display:inline-block;width:42px;height:25px;flex-shrink:0}
+.switch input{position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;z-index:2;width:100%;height:100%}
+.switch-track{position:absolute;inset:0;background:var(--chip-2);
+  border:1px solid var(--border-strong);border-radius:100px;
+  transition:background .22s,border-color .22s,box-shadow .22s}
+.switch-track::after{content:"";position:absolute;top:2px;left:2px;width:19px;height:19px;
+  border-radius:50%;background:#fff;
+  box-shadow:0 1px 4px rgba(0,0,0,.4),inset 0 1px 0 rgba(255,255,255,.9);
+  transition:transform .25s cubic-bezier(.34,1.56,.64,1)}
+.switch input:checked+.switch-track{background:var(--green);border-color:var(--green)}
+.switch input:checked+.switch-track::after{transform:translateX(17px)}
+.switch input:focus-visible+.switch-track{outline:2px solid var(--cyan);outline-offset:2px}
+.switch input:hover+.switch-track{background:var(--border-strong)}
+.switch input:checked:hover+.switch-track{background:var(--green);opacity:.9}
+
+/* thin scrollbars everywhere */
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-thumb{background:var(--scroll);border-radius:4px}
+::-webkit-scrollbar-thumb:hover{background:var(--scroll-2)}
+
+/* accessibility: respect the user's motion / transparency / contrast signals */
+@media (prefers-reduced-motion:reduce){
+  *{transition-duration:.01ms!important;animation-duration:.01ms!important;animation-iteration-count:1!important}
+}
+@media (prefers-reduced-transparency:reduce){
+  header,.filter-bar,.table-header,aside,.modal,.selection-bar{
+    background-image:none!important;background-color:var(--surface-solid)!important;
+    -webkit-backdrop-filter:none!important;backdrop-filter:none!important}
+  .modal-bd{background:var(--scrim)!important}
+}
+@media (prefers-contrast:more){
+  :root{--border:rgba(255,255,255,.22);--border-strong:rgba(255,255,255,.36)}
+  [data-theme="light"]{--border:rgba(0,0,0,.25);--border-strong:rgba(0,0,0,.42)}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">DJ <span>/</span> LIB</div>
+  <div class="search-wrap">
+    <span class="si">⌕</span>
+    <input type="text" id="searchInput" placeholder="Search…" oninput="applyFilters()">
+  </div>
+  <select class="rule-sel" id="sortSelect" style="margin-right:6px" onchange="sortByDropdown()">
+    <option value="title">Sort: Title</option>
+    <option value="artist">Sort: Artist</option>
+    <option value="bpm">Sort: BPM</option>
+    <option value="duration_seconds">Sort: Duration</option>
+    <option value="file_size_bytes">Sort: File size</option>
+    <option value="added_at">Sort: Date added (newest first)</option>
+  </select>
+  <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()"
+    aria-label="Toggle light or dark mode" title="Toggle light or dark mode"></button>
+  <div class="track-count"><b id="visibleCount">0</b> / <span id="totalCount">0</span> tracks</div>
+</header>
+
+<!-- Selection toolbar — appears when songs are Cmd+clicked -->
+<div class="selection-bar" id="selBar">
+  <span class="sel-count" id="selCount">0 selected</span>
+  <button class="btn-sel" onclick="openBatchEdit()">✎ Edit selected</button>
+  <button class="btn-sel" onclick="openAddToCratePicker(null)">+ Add to Crate</button>
+  <button class="btn-sel" id="mergeSelBtn" onclick="mergeSelected()" style="display:none">⇄ Merge…</button>
+  <button class="btn-sel btn-sel-red" onclick="deleteSelected()">✕ Delete selected</button>
+  <button class="btn-clear" onclick="clearSelection()">Clear selection</button>
+</div>
+
+<div class="filter-bar">
+  <div class="fg">
+    <span class="fl">BPM</span>
+    <div class="rw">
+      <span class="rv" id="bpmMinV">60</span>
+      <input type="range" id="bpmMin" min="60" max="200" value="60" oninput="onRange()">
+      <span style="color:var(--muted);font-size:10px">—</span>
+      <input type="range" id="bpmMax" min="60" max="200" value="200" oninput="onRange()">
+      <span class="rv" id="bpmMaxV">200</span>
+    </div>
+  </div>
+  <div class="fdiv"></div>
+  <div class="fg">
+    <span class="fl">Dur</span>
+    <div class="rw">
+      <span class="rv" id="durMinV">0:00</span>
+      <input type="range" id="durMin" min="0" max="600" value="0" oninput="onRange()">
+      <span style="color:var(--muted);font-size:10px">—</span>
+      <input type="range" id="durMax" min="0" max="600" value="600" oninput="onRange()">
+      <span class="rv" id="durMaxV">10:00</span>
+    </div>
+  </div>
+  <div class="fdiv"></div>
+  <div class="fg">
+    <span class="fl">Key</span>
+    <div class="key-pills" id="keyPills"></div>
+  </div>
+  <div class="fdiv"></div>
+  <div class="fg">
+    <span class="fl">Genre</span>
+    <input type="text" class="gfi" id="genreFilter" placeholder="e.g. House"
+      oninput="applyFilters()" list="genreFilterList">
+    <datalist id="genreFilterList"></datalist>
+  </div>
+  <div class="fdiv"></div>
+  <button class="reset-btn" onclick="resetFilters()">✕ Reset</button>
+</div>
+
+<aside>
+  <div class="sb-sec">
+    <div class="sb-label">Download</div>
+    <div class="spotify-connect" id="spotifyConnect">
+      <div class="spotify-dot off" id="spotifyDot"></div>
+      <span class="spotify-text off" id="spotifyText">Not connected</span>
+      <button class="spotify-btn" id="spotifyBtn" onclick="spotifyAuth()">Connect</button>
+    </div>
+    <textarea class="dl-input" id="downloadInput" rows="2" placeholder="Spotify link, song name, or paste a list of songs…"></textarea>
+    <div class="folder-row">
+      <input type="text" class="fi" id="folderInput" placeholder="Folder (optional)" list="folderSuggestions">
+      <datalist id="folderSuggestions"></datalist>
+      <button class="btn" onclick="startDownload()">GET</button>
+    </div>
+    <div class="sp hidden" id="dlStatus"><div class="dot"></div><span id="dlStatusText"></span></div>
+  </div>
+
+  <!-- Sidebar navigation tabs -->
+  <div class="sb-tabs">
+    <button class="sb-tab active" onclick="showTab('library')">Library</button>
+    <button class="sb-tab" onclick="showTab('crates')">Crates</button>
+    <button class="sb-tab" onclick="showTab('transitions')">Transitions</button>
+    <button class="sb-tab" onclick="showTab('tools')">Tools</button>
+  </div>
+
+  <!-- LIBRARY TAB -->
+  <div class="sb-panel active" id="tab-library">
+    <div class="nav-list" id="folderList">
+      <div class="nav-item active" onclick="setFolder(null,this)">
+        <span class="nav-item-label">▤ All tracks</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- CRATES TAB -->
+  <div class="sb-panel" id="tab-crates">
+    <div style="padding:10px 14px">
+      <button class="btn-ghost" onclick="openNewCrateModal()">+ New Smart Crate</button>
+    </div>
+    <div class="nav-list" id="crateList"></div>
+  </div>
+
+  <!-- TRANSITIONS TAB -->
+  <div class="sb-panel" id="tab-transitions">
+    <div style="padding:10px 14px">
+      <button class="btn-ghost" onclick="openAddTransitionModal(null)">⇄ + Add Transition</button>
+      <button class="btn-ghost" onclick="syncTransitionsToMixxx()" style="margin-left:6px"
+        title="Write each song's outgoing transition notes into its Mixxx comment (Mixxx must be closed)">⇄ Sync to Mixxx comments</button>
+      <button class="btn-ghost" onclick="exportTransitionsCsv()" style="margin-left:6px"
+        title="Download every transition as a CSV spreadsheet (keys + BPMs included)">⬇ CSV</button>
+      <button class="btn-ghost" onclick="window.open('/api/transitions/setlist','_blank')" style="margin-left:6px"
+        title="Open a print-friendly setlist page (Cmd+P to save as PDF)">🖨 Setlist</button>
+      <div class="tool-hint" style="margin-top:8px">Every mix link you've made, grouped by the
+        song it starts from. Click a song to jump to it — or right-click any song in the
+        library for its full transition view.</div>
+    </div>
+    <div class="nav-list" id="transitionList" style="padding:0 10px 16px"></div>
+  </div>
+
+  <!-- TOOLS TAB -->
+  <div class="sb-panel" id="tab-tools">
+    <div style="padding:12px 14px 18px">
+      <div class="sb-label">Import folder</div>
+      <div style="display:flex;gap:8px">
+        <input type="text" class="fi" id="importFolderPath"
+          placeholder="/Users/you/Downloads/some-folder"
+          onkeydown="if(event.key==='Enter')startFolderImport()">
+        <button class="btn-ghost" onclick="openFolderPicker()" style="flex-shrink:0"
+          title="Browse or search for a folder">🔍 Browse…</button>
+      </div>
+
+      <div class="tool-card" style="margin-top:12px">
+        <div class="tool-opt">
+          <div class="tool-opt-text">
+            <div class="tool-opt-name">Auto-create crates from subfolders</div>
+            <div class="tool-opt-desc">e.g. …/House/track.mp3 → crate "House" (created if missing)</div>
+          </div>
+          <label class="switch" title="Create a crate per subfolder">
+            <input type="checkbox" id="autoCrateCheckbox" onchange="toggleAutoCrateMode()">
+            <span class="switch-track"></span>
+          </label>
+        </div>
+        <div class="tool-opt">
+          <div class="tool-opt-text">
+            <div class="tool-opt-name">Auto-tag genre from subfolders</div>
+            <div class="tool-opt-desc">Writes the folder name into each file's genre tag</div>
+          </div>
+          <label class="switch" title="Write the folder name as the genre">
+            <input type="checkbox" id="autoGenreCheckbox">
+            <span class="switch-track"></span>
+          </label>
+        </div>
+        <div class="tool-opt">
+          <div class="tool-opt-text">
+            <div class="tool-opt-name">Import even if already owned</div>
+            <div class="tool-opt-desc">Skips duplicate checking — use the Merge tool afterward</div>
+          </div>
+          <label class="switch" title="Skip duplicate checking">
+            <input type="checkbox" id="forceDuplicatesCheckbox">
+            <span class="switch-track"></span>
+          </label>
+        </div>
+      </div>
+
+      <div style="margin-top:12px;display:flex;flex-direction:column;gap:8px">
+        <select class="rule-sel" id="importCrateSelect" style="width:100%">
+          <option value="">No crate — just add to library</option>
+        </select>
+        <input type="text" class="fi" id="importSubfolder" style="width:100%"
+          placeholder="Destination subfolder (optional)">
+        <button class="btn-ghost" onclick="startFolderImport()" id="importBtn">⇩ Import Folder</button>
+        <div class="sp hidden" id="importStatus" style="width:100%">
+          <div class="dot"></div><span id="importStatusText"></span>
+        </div>
+        <div class="tool-hint">Scans the folder for MP3/WAV/FLAC/M4A files, copies them into
+          your library (originals untouched), skips anything already owned.</div>
+      </div>
+
+      <div style="margin-top:18px">
+        <div class="sb-label">Duplicates</div>
+        <div class="dupe-count" id="dupeCount">—</div>
+        <div class="dupe-sub">duplicate groups</div>
+        <button class="btn-ghost" onclick="openDupeModal()">Review & clean up duplicates</button>
+        <button class="btn-ghost" onclick="openMergePicker()"
+          style="border-color:rgba(50,215,75,.4);color:var(--green);background:var(--green-dim)">
+          ⇄ Merge any 2+ songs…
+        </button>
+        <div class="tool-hint">The duplicate scan can't catch everything (Finder renames
+          copies like “Animals (1)” differently). Merge lets you pick any songs
+          that are actually the same track and keep only the best-quality file.</div>
+      </div>
+
+      <div style="margin-top:18px">
+        <div class="sb-label">Library</div>
+        <button class="btn-ghost" onclick="rescan()">↻ Re-scan folder</button>
+        <button class="btn-ghost" id="bpmBtn" onclick="analyzeBpm()">♩ Analyze BPM & Key</button>
+      </div>
+    </div>
+  </div>
+</aside>
+
+<div class="gutter" id="sbGutter" title="Drag to resize the sidebar — double-click to reset"></div>
+
+<main>
+  <div class="song-list" id="songList">
+    <!-- sticky frosted header -- rows scroll underneath and blur as they pass -->
+    <div class="table-header" id="tableHeader"></div>
+    <div id="songRows">
+      <div class="empty"><div class="empty-icon">♫</div><div>Loading…</div></div>
+    </div>
+  </div>
+</main>
+
+<!-- INFO / BATCH EDIT MODAL -->
+<div class="modal-bd" id="infoModal">
+  <div class="modal modal-w">
+    <div class="mhdr">
+      <div class="mtitle" id="infoTitle" style="color:var(--cyan)">Song Info</div>
+      <button class="mclose" onclick="closeInfoModal()">✕</button>
+    </div>
+    <div class="mbody">
+      <div id="batchNote" class="batch-note" style="display:none"></div>
+      <div class="ig" id="infoGrid"></div>
+      <div id="transitionsSection" style="margin-top:22px"></div>
+    </div>
+    <div class="iacts">
+      <button class="btn-ghost" style="width:auto" id="infoFinderBtn"
+        onclick="revealInFinder(currentSong?.filepath)">Show in Finder</button>
+      <button class="btn-save" onclick="saveInfo()">Save to file</button>
+    </div>
+  </div>
+</div>
+
+<!-- NEW CRATE MODAL -->
+<div class="modal-bd" id="crateModal">
+  <div class="modal">
+    <div class="mhdr">
+      <div class="mtitle" style="color:var(--purple)" id="crateModalTitle">New Smart Crate</div>
+      <button class="mclose" onclick="closeCrateModal()">✕</button>
+    </div>
+    <div class="mbody">
+      <div style="margin-bottom:14px">
+        <div class="il" style="text-align:left;margin-bottom:6px">Crate name</div>
+        <input class="ii" id="crateName" placeholder="e.g. Morning House" style="width:100%">
+      </div>
+
+      <div style="display:flex;gap:16px;margin-bottom:14px;font-family:var(--mono);font-size:11px">
+        <label style="display:flex;align-items:center;gap:5px;cursor:pointer;color:var(--text)">
+          <input type="radio" name="crateType" value="smart" id="crateTypeSmart" checked onchange="toggleCrateType()">
+          Smart (auto-filled by rules)
+        </label>
+        <label style="display:flex;align-items:center;gap:5px;cursor:pointer;color:var(--text)">
+          <input type="radio" name="crateType" value="manual" id="crateTypeManual" onchange="toggleCrateType()">
+          Manual (you add songs yourself)
+        </label>
+      </div>
+
+      <div id="smartCrateSection">
+        <div class="il" style="text-align:left;margin-bottom:8px;color:var(--muted)">
+          Rules — songs must match ALL of these:
+        </div>
+        <div id="ruleRows"></div>
+        <button class="btn-ghost" style="width:auto;margin-top:4px" onclick="addRule()">+ Add rule</button>
+        <div style="margin-top:12px;font-family:var(--mono);font-size:10px;color:var(--muted)">
+          Smart crates update automatically as your library grows.
+        </div>
+
+        <div style="margin-top:14px;padding:10px;background:var(--surface2);border-radius:var(--r);border:1px solid var(--border)">
+          <div style="font-family:var(--mono);font-size:10px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px">
+            Typical BPM by genre (rough guide)
+          </div>
+          <div style="font-family:var(--mono);font-size:10px;color:var(--text);line-height:1.9;columns:2">
+            <div>Ambient / Chill: 60–90</div>
+            <div>Hip-Hop / R&B: 80–100</div>
+            <div>Downtempo: 90–110</div>
+            <div>Disco / Nu-Disco: 110–125</div>
+            <div>Deep House: 118–124</div>
+            <div>House: 120–128</div>
+            <div>Tech House: 122–128</div>
+            <div>Melodic Techno: 120–128</div>
+            <div>Progressive: 124–130</div>
+            <div>Techno: 125–150</div>
+            <div>Trance: 128–140</div>
+            <div>Psytrance: 140–148</div>
+            <div>Dubstep: 138–142</div>
+            <div>Drum & Bass / Jungle: 160–180</div>
+          </div>
+        </div>
+      </div>
+
+      <div id="manualCrateSection" style="display:none">
+        <div style="font-family:var(--mono);font-size:11px;color:var(--muted);line-height:1.6">
+          This crate starts empty. After creating it, select songs in the library
+          (Cmd+click) and use "+ Add to Crate" in the selection bar — or add an
+          entire folder at once from the Library tab.
+        </div>
+      </div>
+    </div>
+    <div class="iacts">
+      <button class="btn-save" onclick="saveCrate()">Create Crate</button>
+    </div>
+  </div>
+</div>
+
+<!-- ADD TO CRATE PICKER -->
+<div class="modal-bd" id="addToCrateModal">
+  <div class="modal" style="width:380px">
+    <div class="mhdr">
+      <div class="mtitle" style="color:var(--purple)">Add to Crate</div>
+      <button class="mclose" onclick="closeAddToCrateModal()">✕</button>
+    </div>
+    <div class="mbody" id="addToCrateBody">
+      <!-- populated by JS -->
+    </div>
+  </div>
+</div>
+
+<!-- ADD TRANSITION MODAL -->
+<div class="modal-bd" id="addTransitionModal">
+  <div class="modal" style="width:460px">
+    <div class="mhdr">
+      <div class="mtitle" style="color:var(--cyan)">⇄ Add Transition</div>
+      <button class="mclose" onclick="closeAddTransitionModal()">✕</button>
+    </div>
+    <div class="mbody" id="addTransitionBody"></div>
+  </div>
+</div>
+
+<!-- FOLDER PICKER -->
+<div class="modal-bd" id="folderPickerModal">
+  <div class="modal modal-w">
+    <div class="mhdr">
+      <div class="mtitle" style="color:var(--green)">🗂 Choose a folder</div>
+      <button class="mclose" onclick="closeFolderPicker()">✕</button>
+    </div>
+    <div class="mbody" style="padding-bottom:0">
+      <input type="text" class="fi" id="folderSearchInput" style="width:100%"
+        placeholder="Search folders by name… (Spotlight)" autocomplete="off">
+      <div class="fpath" id="folderCrumb"></div>
+      <div class="froots" id="folderRoots"></div>
+      <div class="flist" id="folderEntries"></div>
+    </div>
+    <div class="iacts">
+      <div id="folderUsePath" style="flex:1;font-family:var(--mono);font-size:10px;color:var(--muted);word-break:break-all;text-align:left"></div>
+      <button class="btn-ghost" onclick="closeFolderPicker()">Cancel</button>
+      <button class="btn-save" id="folderUseBtn" onclick="usePickedFolder()">Use this folder</button>
+    </div>
+  </div>
+</div>
+
+<!-- DUPE MODAL -->
+<div class="modal-bd" id="dupeModal">
+  <div class="modal">
+    <div class="mhdr">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div class="mtitle" style="color:var(--yellow)">⚠ DUPLICATES</div>
+        <button class="bdm" id="mergeAllBtn" onclick="mergeAllDuplicates()">⇄ Merge All</button>
+      </div>
+      <button class="mclose" onclick="closeDupeModal()">✕</button>
+    </div>
+    <div class="mbody" id="dupeModalBody">Loading…</div>
+  </div>
+</div>
+
+<!-- MERGE PICKER MODAL -- manually choose any 2+ songs to merge, even if the
+     duplicate scan never flagged them as the same track -->
+<div class="modal-bd" id="mergePickerModal">
+  <div class="modal modal-w">
+    <div class="mhdr">
+      <div class="mtitle" style="color:var(--green)">⇄ Merge songs</div>
+      <button class="mclose" onclick="closeMergePicker()">✕</button>
+    </div>
+    <div class="mbody">
+      <div class="tool-hint" style="margin-bottom:10px">Pick 2 or more songs that are the
+        same track. The highest-quality file is kept and the rest are merged into it
+        (metadata, crates and transition notes transfer over).</div>
+      <input class="ii" id="mergePickSearch" placeholder="Search songs…"
+        oninput="renderMergePicker()" style="width:100%;margin-bottom:10px">
+      <div id="mergePickList" style="max-height:380px;overflow-y:auto"></div>
+    </div>
+    <div class="iacts">
+      <button class="btn-ghost" style="width:auto" onclick="closeMergePicker()">Cancel</button>
+      <button class="btn-save" id="mergePickGo" style="background:var(--green)"
+        onclick="goMergePicker()" disabled>Merge selected (need 2)</button>
+    </div>
+  </div>
+</div>
+
+<!-- MERGE PREVIEW MODAL -->
+<div class="modal-bd" id="mergeModal">
+  <div class="modal modal-w">
+    <div class="mhdr">
+      <div class="mtitle" style="color:var(--green)">⇄ Merge Preview</div>
+      <button class="mclose" onclick="closeMergeModal()">✕</button>
+    </div>
+    <div class="mbody" id="mergeModalBody">Loading…</div>
+    <div class="iacts">
+      <button class="btn-ghost" style="width:auto" onclick="closeMergeModal()">Cancel</button>
+      <button class="btn-save" style="background:var(--green)" onclick="confirmMerge()">Confirm Merge</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// MUSIC_DIR is overwritten from /api/config at startup (config.json is the
+// single source of truth) -- the value below is only a fallback if that fetch fails.
+let MUSIC_DIR = '/Users/you/Music';
+const GENRES_PRESET = ['House','Deep House','Tech House','Minimal House','Techno',
+  'Melodic Techno','Industrial Techno','EDM','Progressive','Trance','Psytrance',
+  'Drum & Bass','Jungle','Breaks','Disco','Nu-Disco','Funk','Soul',
+  'Hip-Hop','R&B','Pop','Indie','Ambient','Chill','Downtempo'];
+
+let allSongs = [];
+let visibleSongs = [];
+let selectedIds = new Set();
+let currentFolder = null;
+let currentCrate  = null;
+let currentSort   = { field:'title', asc:true };
+let activeKeys    = new Set();
+let bpmActive = false, durActive = false;
+let currentSong   = null;
+let isBatchEdit   = false;
+let editingCrateId = null;
+let statusPoll    = null;
+
+// -- THEME -------------------------------------------------------------------
+// The saved/system theme is applied before first paint by the inline script in
+// <head>; this just flips the attribute and remembers the choice.
+function toggleTheme(){
+  const cur = document.documentElement.getAttribute('data-theme');
+  const next = cur === 'light' ? 'dark' : 'light';
+  document.documentElement.setAttribute('data-theme', next);
+  try { localStorage.setItem('djlib_theme', next); } catch(e) {}
+}
+
+// -- COLUMN REORDERING -------------------------------------------------------
+// The checkbox, index (#), and Actions columns are always pinned in place --
+// everything else can be dragged into any order. The order is saved to
+// localStorage so it persists between sessions. Since this is a plain local
+// web page (not a Claude artifact), localStorage works normally here.
+const COLUMN_CONFIG = {
+  title:             { label: 'Title', width: '1fr' },
+  genre:             { label: 'Genre', width: '100px' },
+  bpm:               { label: 'BPM',   width: '58px' },
+  musical_key:       { label: 'Key',   width: '64px' },
+  duration_seconds:  { label: 'Dur',   width: '60px' },
+  file_size_bytes:   { label: 'Size',  width: '56px' },
+};
+const DEFAULT_COLUMN_ORDER = ['title','genre','bpm','musical_key','duration_seconds','file_size_bytes'];
+let columnOrder = loadColumnOrder();
+let dragColKey = null;
+
+function loadColumnOrder() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('djlib_column_order'));
+    if (Array.isArray(saved) && saved.length === DEFAULT_COLUMN_ORDER.length &&
+        saved.every(k => DEFAULT_COLUMN_ORDER.includes(k))) {
+      return saved;
+    }
+  } catch {}
+  return [...DEFAULT_COLUMN_ORDER];
+}
+
+function saveColumnOrder() {
+  localStorage.setItem('djlib_column_order', JSON.stringify(columnOrder));
+}
+
+function defaultColWidths() {
+  const d = {};
+  for (const k of Object.keys(COLUMN_CONFIG)) {
+    d[k] = COLUMN_CONFIG[k].width === '1fr' ? '1fr' : parseInt(COLUMN_CONFIG[k].width, 10);
+  }
+  return d;
+}
+
+function loadColWidths() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('djlib_col_widths'));
+    if (saved && typeof saved === 'object') {
+      const d = defaultColWidths();
+      for (const k of Object.keys(d)) if (typeof saved[k] === 'number') d[k] = saved[k];
+      return d;
+    }
+  } catch {}
+  return defaultColWidths();
+}
+
+function saveColWidths() {
+  try { localStorage.setItem('djlib_col_widths', JSON.stringify(colWidths)); } catch {}
+}
+
+let colWidths = loadColWidths();
+
+// A column's effective grid width -- title stays flexible unless the user sized it
+function renderWidth(key) {
+  const w = colWidths[key];
+  if (key === 'title' && w === '1fr') return '1fr';
+  if (key === 'title') return `minmax(${w}px, 1fr)`;
+  return `${w}px`;
+}
+
+function currentGridTemplate() {
+  const widths = columnOrder.map(k => renderWidth(k)).join(' ');
+  return `20px 32px ${widths} 92px`;
+}
+
+// Header and every row both read --row-grid, so updating the variable once
+// keeps the header, rows, and any reordering perfectly in sync.
+function applyGridTemplate() {
+  const tmpl = currentGridTemplate();
+  const main = document.querySelector('main');
+  if (main) main.style.setProperty('--row-grid', tmpl);
+  const header = document.getElementById('tableHeader');
+  if (header) header.style.gridTemplateColumns = tmpl;
+}
+
+function onColResizeStart(e, key) {
+  e.preventDefault();
+  e.stopPropagation();   // don't trigger sort or column reorder-drag
+  const startX = e.clientX;
+  const startW = colWidths[key] === '1fr' ? 260 : colWidths[key];
+  const move = ev => {
+    const w = Math.max(key === 'title' ? 140 : 40, startW + (ev.clientX - startX));
+    colWidths[key] = Math.round(w);
+    applyGridTemplate();
+  };
+  const up = () => {
+    window.removeEventListener('mousemove', move);
+    window.removeEventListener('mouseup', up);
+    saveColWidths();
+  };
+  window.addEventListener('mousemove', move);
+  window.addEventListener('mouseup', up);
+}
+
+function onColResizeDblClick(e, key) {
+  e.preventDefault();
+  e.stopPropagation();
+  autoFitColumn(key);
+}
+
+// Sizes a column to its longest visible content (header cell + all rendered rows)
+function autoFitColumn(key) {
+  let max = 40;
+  const hc = document.getElementById('col-' + key);
+  if (hc) max = Math.max(max, hc.scrollWidth);
+  document.querySelectorAll(`.song-row [data-colkey="${key}"]`).forEach(cell => {
+    max = Math.max(max, cell.scrollWidth);
+    if (key === 'title') {
+      cell.querySelectorAll('.stitle,.sartist').forEach(el => max = Math.max(max, el.scrollWidth));
+    }
+  });
+  colWidths[key] = Math.max(key === 'title' ? 140 : 40, Math.min(max + 14, 600));
+  applyGridTemplate();
+  saveColWidths();
+  // brief highlight so the freshly fitted column is easy to spot
+  const grip = document.querySelector(`#col-${key} .col-resize`);
+  if (grip) { grip.classList.add('zooming'); setTimeout(() => grip.classList.remove('zooming'), 500); }
+}
+
+function fitAllColumns() {
+  Object.keys(COLUMN_CONFIG).forEach(autoFitColumn);
+}
+
+function buildTableHeader() {
+  const header = document.getElementById('tableHeader');
+  applyGridTemplate();
+  const cells = columnOrder.map(key => {
+    const cfg = COLUMN_CONFIG[key];
+    return `<div class="col draggable" draggable="true" data-colkey="${key}"
+      onclick="sortBy('${key}')" id="col-${key}"
+      ondragstart="onColDragStart(event,'${key}')"
+      ondragover="onColDragOver(event)"
+      ondragleave="onColDragLeave(event)"
+      ondrop="onColDrop(event,'${key}')"
+      ondragend="onColDragEnd(event)">${cfg.label}
+      <span class="col-resize" title="Drag to resize · double-click to auto-fit"
+        onmousedown="onColResizeStart(event,'${key}')"
+        onclick="event.stopPropagation()"
+        ondblclick="onColResizeDblClick(event,'${key}')"></span>
+    </div>`;
+  }).join('');
+  header.innerHTML = `<div class="col ns"></div><div class="col ns">#</div>${cells}
+    <div class="col ns"><button class="fit-all" onclick="fitAllColumns()"
+      title="Auto-fit every column to its longest content">⇆ Fit all</button></div>`;
+  // Re-apply the sorted-column arrow indicator after rebuilding
+  const col = document.getElementById(`col-${currentSort.field}`);
+  if (col) {
+    col.classList.add('sorted');
+    const a = document.createElement('span'); a.className = 'sa';
+    a.textContent = currentSort.asc ? '↑' : '↓';
+    col.appendChild(a);
+  }
+}
+
+function onColDragStart(e, key) {
+  dragColKey = key;
+  e.dataTransfer.effectAllowed = 'move';
+}
+function onColDragOver(e) {
+  e.preventDefault();
+  e.currentTarget.classList.add('drag-over');
+}
+function onColDragLeave(e) {
+  e.currentTarget.classList.remove('drag-over');
+}
+function onColDrop(e, targetKey) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('drag-over');
+  if (!dragColKey || dragColKey === targetKey) return;
+  const from = columnOrder.indexOf(dragColKey);
+  const to = columnOrder.indexOf(targetKey);
+  if (from === -1 || to === -1) return;
+  columnOrder.splice(from, 1);
+  columnOrder.splice(to, 0, dragColKey);
+  saveColumnOrder();
+  buildTableHeader();
+  applyFilters();  // re-render rows with the new column order/widths
+}
+function onColDragEnd() {
+  dragColKey = null;
+  document.querySelectorAll('.col.drag-over').forEach(el => el.classList.remove('drag-over'));
+}
+
+// ── SIDEBAR RESIZER ───────────────────────────────────────────────────────────
+// Drag the gutter between the sidebar and the library to resize; the width is
+// clamped (200–560px), persisted in localStorage, and double-click resets it.
+let sbDragging=false;
+function initSidebarResizer(){
+  const g=document.getElementById('sbGutter');
+  if(!g) return;
+  const saved=parseInt(localStorage.getItem('sidebarW')||'',10);
+  if(saved>=200 && saved<=560) document.body.style.setProperty('--sidebar-w', saved+'px');
+  g.addEventListener('mousedown',e=>{
+    sbDragging=true; g.classList.add('dragging');
+    document.body.style.cursor='col-resize';
+    document.body.style.userSelect='none';
+    e.preventDefault();
+  });
+  window.addEventListener('mousemove',e=>{
+    if(!sbDragging) return;
+    const w=Math.min(560,Math.max(200,e.clientX));  // sidebar starts at x=0
+    document.body.style.setProperty('--sidebar-w', w+'px');
+  });
+  const stop=()=>{
+    if(!sbDragging) return;
+    sbDragging=false; g.classList.remove('dragging');
+    document.body.style.cursor=''; document.body.style.userSelect='';
+    const w=parseFloat(document.body.style.getPropertyValue('--sidebar-w'))||288;
+    try{ localStorage.setItem('sidebarW', String(Math.round(w))); }catch(_){}
+  };
+  window.addEventListener('mouseup',stop);
+  window.addEventListener('blur',stop);
+  g.addEventListener('dblclick',()=>{
+    document.body.style.setProperty('--sidebar-w','288px');
+    try{ localStorage.setItem('sidebarW','288'); }catch(_){}
+  });
+}
+
+// ── INIT ──────────────────────────────────────────────────────────────────────
+async function init() {
+  initSidebarResizer();
+  // Pull the real music folder from the backend so renaming it only requires
+  // editing config.json, not three hardcoded places.
+  try {
+    const cfgResp = await fetch('/api/config');
+    const cfg = await cfgResp.json();
+    if (cfg && cfg.music_dir) MUSIC_DIR = cfg.music_dir;
+  } catch(e) { console.error('Failed to load config:', e); }
+  buildKeyPills();
+  buildTableHeader();
+  await loadSongs();
+  await loadCrates();
+  await checkDuplicates();
+  await loadGenreSuggestions();
+}
+
+// ── DATA ──────────────────────────────────────────────────────────────────────
+async function loadSongs(crateId=null) {
+  let url = crateId ? `/api/crates/${crateId}/songs` : '/api/songs';
+  const resp = await fetch(url);
+  allSongs = await resp.json();
+  buildFolderList();
+  applyFilters();
+}
+
+async function loadGenreSuggestions() {
+  const resp = await fetch('/api/genres');
+  const genres = await resp.json();
+  const all = [...new Set([...GENRES_PRESET,...genres])].sort();
+  ['genreFilterList','genreEditList'].forEach(id => {
+    let dl = document.getElementById(id);
+    if (!dl) { dl=document.createElement('datalist'); dl.id=id; document.body.appendChild(dl); }
+    dl.innerHTML = all.map(g=>`<option value="${esc(g)}">`).join('');
+  });
+}
+
+// ── TABS ──────────────────────────────────────────────────────────────────────
+function showTab(name) {
+  document.querySelectorAll('.sb-tab').forEach((t,i)=>{
+    const tabs=['library','crates','transitions','tools'];
+    t.classList.toggle('active', tabs[i]===name);
+  });
+  document.querySelectorAll('.sb-panel').forEach(p=>p.classList.remove('active'));
+  document.getElementById(`tab-${name}`).classList.add('active');
+  // Fresh data whenever the Transitions tab becomes visible
+  if(name==='transitions') renderTransitionTab();
+}
+
+// ── FOLDERS ───────────────────────────────────────────────────────────────────
+function buildFolderList() {
+  const base = MUSIC_DIR+'/';
+  const folders = new Set();
+  allSongs.forEach(s=>{
+    const rel=s.filepath.replace(base,'');
+    const parts=rel.split('/');
+    if(parts.length>1) folders.add(parts[0]);
+  });
+  const list = document.getElementById('folderList');
+  list.innerHTML = `<div class="nav-item ${currentFolder===null&&!currentCrate?'active':''}"
+    onclick="setFolder(null,this)"><span class="nav-item-label">▤ All tracks</span></div>`;
+  folders.forEach(f=>{
+    const div=document.createElement('div');
+    div.className=`nav-item ${currentFolder===f?'active':''}`;
+    // While a crate is selected, allSongs only holds that crate's songs, so
+    // this folder list is partial -- hide the destructive ✕ in that state so
+    // it can never delete more than the user can see. Clicking a folder (or
+    // All tracks) reloads the full library and the button returns.
+    const manageBtn = currentCrate === null
+      ? `<button class="nav-item-del" title="Delete this folder and all its songs from library & disk"
+          onclick="event.stopPropagation();deleteFolder('${esc(f).replace(/'/g,"\\'")}')">✕</button>`
+      : '';
+    div.innerHTML=`<span class="nav-item-label">◫ ${esc(f)}</span>
+      <button class="nav-item-sync" title="Add this folder to a crate"
+        onclick="event.stopPropagation();addFolderToCrate('${esc(f).replace(/'/g,"\\'")}')">+</button>
+      ${manageBtn}`;
+    div.onclick=()=>setFolder(f,div);
+    list.appendChild(div);
+  });
+  const dl=document.getElementById('folderSuggestions');
+  dl.innerHTML=[...folders].map(f=>`<option value="${esc(f)}">`).join('');
+}
+
+function setFolder(folder, el) {
+  currentFolder=folder; currentCrate=null;
+  document.querySelectorAll('.nav-item').forEach(e=>e.classList.remove('active'));
+  el.classList.add('active');
+  // reload all songs when switching folder (leave crate mode)
+  if(allSongs.length===0||currentCrate!==null) loadSongs();
+  else applyFilters();
+}
+
+// ── CRATES ────────────────────────────────────────────────────────────────────
+async function loadCrates() {
+  const resp = await fetch('/api/crates');
+  const crates = await resp.json();
+  const list = document.getElementById('crateList');
+  window._allCrates = crates;  // cache for the "add to crate" picker
+  list.innerHTML = crates.map(c=>`
+    <div class="nav-item ${currentCrate===c.id?'active':''}" id="crate-nav-${c.id}"
+      onclick="selectCrate(${c.id},this)">
+      <span class="nav-item-label">${esc(c.name)}</span>
+      <span class="crate-badge">${c.is_smart?'smart':'manual'}</span>
+      <button class="nav-item-sync" id="sync-btn-${c.id}"
+        onclick="event.stopPropagation();syncCrateToMixxx(${c.id})" title="Sync to Mixxx">⇄</button>
+      <button class="nav-item-del" onclick="event.stopPropagation();deleteCrate(${c.id})" title="Delete">✕</button>
+    </div>`).join('');
+  populateImportCrateSelect();
+}
+
+// Keep the folder-import crate dropdown in sync with the crate list
+function populateImportCrateSelect() {
+  const sel = document.getElementById('importCrateSelect');
+  if (!sel) return;
+  const crates = window._allCrates || [];
+  sel.innerHTML = '<option value="">No crate — just add to library</option>' +
+    crates.filter(c => !c.is_smart).map(c =>
+      `<option value="${c.id}">${esc(c.name)}</option>`
+    ).join('');
+}
+
+// -- FOLDER IMPORT -----------------------------------------------------------
+function toggleAutoCrateMode() {
+  const auto = document.getElementById('autoCrateCheckbox').checked;
+  const sel = document.getElementById('importCrateSelect');
+  sel.disabled = auto;
+  sel.style.opacity = auto ? '0.4' : '1';
+}
+
+async function startFolderImport() {
+  const folder = document.getElementById('importFolderPath').value.trim();
+  const autoCrate = document.getElementById('autoCrateCheckbox').checked;
+  const autoGenre = document.getElementById('autoGenreCheckbox').checked;
+  const forceDupes = document.getElementById('forceDuplicatesCheckbox').checked;
+  const crateId = document.getElementById('importCrateSelect').value || null;
+  const subfolder = document.getElementById('importSubfolder').value.trim() || null;
+
+  if (!folder) { alert('Enter a folder path first.'); return; }
+
+  const btn = document.getElementById('importBtn');
+  btn.disabled = true;
+  setImportStatus('downloading', 'Scanning folder…');
+
+  const resp = await fetch('/api/import-folder', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      folder, subfolder,
+      crate_id: crateId,
+      auto_crate_by_subfolder: autoCrate,
+      auto_genre_by_subfolder: autoGenre,
+      force_duplicates: forceDupes
+    })
+  });
+  const data = await resp.json();
+
+  if (data.error) {
+    setImportStatus('failed', data.error);
+    btn.disabled = false;
+    return;
+  }
+
+  setImportStatus('downloading', `0 / ${data.total} scanned…`);
+
+  const jobId = data.job_id;
+  const poll = setInterval(async () => {
+    const s = await fetch(`/api/import-folder-status/${jobId}`).then(r=>r.json());
+    if (s.status === 'success') {
+      clearInterval(poll);
+      const added = (s.added_song_ids||[]).length;
+      let msg = `Done — ${added} imported, ${s.skipped_duplicate||0} already owned`;
+      if (s.crates_used && s.crates_used.length) {
+        msg += ` → ${s.crates_used.join(', ')}`;
+      }
+      setImportStatus('success', msg);
+      btn.disabled = false;
+      document.getElementById('importFolderPath').value = '';
+      await loadSongs(currentCrate);
+      await loadCrates();
+      await checkDuplicates();
+    } else {
+      setImportStatus('downloading', `${s.done||0} / ${s.total||'?'} processed…`);
+    }
+  }, 3000);
+}
+
+// ── FOLDER PICKER ─────────────────────────────────────────────────────────────
+// Finder-style browse + search for the Import Folder tool. All filesystem
+// access happens on the backend; this only renders what /api/folders returns.
+let folderPick = { path: null };
+let folderSearchTimer = null;
+
+function openFolderPicker(){
+  const m = document.getElementById('folderPickerModal');
+  m.classList.add('open');
+  document.getElementById('folderSearchInput').value = '';
+  browseFolder('');   // home
+}
+
+function closeFolderPicker(){
+  document.getElementById('folderPickerModal').classList.remove('open');
+}
+
+async function browseFolder(path){
+  const resp = await fetch('/api/folders/browse?path='+encodeURIComponent(path));
+  const data = await resp.json();
+  const list = document.getElementById('folderEntries');
+  const crumb = document.getElementById('folderCrumb');
+  document.getElementById('folderUsePath').textContent = '';
+  if(data.error){
+    list.innerHTML = `<div class="fempty">${esc(data.error)}</div>`;
+    crumb.innerHTML = '';
+    document.getElementById('folderRoots').innerHTML = '';
+    return;
+  }
+  folderPick.path = data.path;
+  document.getElementById('folderUsePath').textContent = data.path;
+
+  // Clickable breadcrumb: every path segment jumps back to that level.
+  const parts = data.path.split('/').filter(Boolean);
+  let acc = '';
+  crumb.innerHTML = `<span class="seg" title="Home" onclick="browseFolder('')">⌂</span>` +
+    parts.map(p=>{
+      acc += '/' + p;
+      const a = acc;
+      return `<span class="seg" title="${esc(a)}" onclick="browseFolder('${esc(a).replace(/'/g,"\\'")}')">${esc(p)}</span>`;
+    }).join('<span style="opacity:.35">/</span>');
+  crumb.title = data.path;
+
+  // Quick roots: home, Music, Downloads, Desktop, external volumes.
+  document.getElementById('folderRoots').innerHTML =
+    (data.roots||[]).map(r=>
+      `<button class="froot" onclick="browseFolder('${esc(r.path).replace(/'/g,"\\'")}')">${esc(r.label)}</button>`
+    ).join('');
+
+  if(!data.entries.length){
+    list.innerHTML = `<div class="fempty">This folder is empty</div>`;
+    return;
+  }
+  list.innerHTML = data.entries.map(e=>
+    `<div class="fitem" title="${esc(e.path)}" onclick="browseFolder('${esc(e.path).replace(/'/g,"\\'")}')">
+      <span class="fico">📁</span>
+      <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(e.name)}</span>
+      ${e.has_audio?`<span class="faudio">♪ audio</span>`:''}
+    </div>`
+  ).join('');
+}
+
+function onFolderSearchInput(){
+  clearTimeout(folderSearchTimer);
+  const q = document.getElementById('folderSearchInput').value.trim();
+  if(q.length < 2){
+    browseFolder(folderPick.path || '');   // back to the folder tree
+    return;
+  }
+  folderSearchTimer = setTimeout(()=>searchFolders(q), 250);
+}
+
+async function searchFolders(q){
+  const resp = await fetch('/api/folders/search?q='+encodeURIComponent(q));
+  const data = await resp.json();
+  document.getElementById('folderCrumb').innerHTML =
+    `<span style="color:var(--cyan)">🔍 “${esc(q)}”</span><span style="opacity:.5"> — ${data.results.length} folder(s)</span>`;
+  document.getElementById('folderRoots').innerHTML =
+    `<button class="froot" onclick="clearFolderSearch()">✕ Clear search</button>`;
+  const list = document.getElementById('folderEntries');
+  if(!data.results.length){
+    list.innerHTML = `<div class="fempty">No folders named “${esc(q)}” found</div>`;
+    return;
+  }
+  list.innerHTML = data.results.map(p=>{
+    const name = p.split('/').filter(Boolean).pop() || p;
+    const parent = p.split('/').slice(0,-1).join('/') || '/';
+    return `<div class="fitem" title="${esc(p)}" onclick="browseFolder('${esc(p).replace(/'/g,"\\'")}')">
+      <span class="fico">📁</span>
+      <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(name)}</span>
+      <span class="fsub">${esc(parent)}</span>
+    </div>`;
+  }).join('');
+}
+
+function clearFolderSearch(){
+  document.getElementById('folderSearchInput').value = '';
+  browseFolder(folderPick.path || '');
+}
+
+function usePickedFolder(){
+  if(!folderPick.path) return;
+  document.getElementById('importFolderPath').value = folderPick.path;
+  closeFolderPicker();
+  document.getElementById('importFolderPath').focus();
+}
+
+document.getElementById('folderSearchInput').addEventListener('input', onFolderSearchInput);
+document.addEventListener('keydown', e=>{
+  if(e.key==='Escape' && document.getElementById('folderPickerModal').classList.contains('open'))
+    closeFolderPicker();
+});
+
+function setImportStatus(type, text) {
+  const p = document.getElementById('importStatus');
+  p.classList.remove('hidden');
+  p.className = `sp ${type}`;
+  document.getElementById('importStatusText').textContent = text;
+  p.querySelector('.dot').classList.toggle('pulse', type === 'downloading');
+}
+
+async function selectCrate(id, el) {
+  currentCrate=id; currentFolder=null;
+  document.querySelectorAll('.nav-item').forEach(e=>e.classList.remove('active'));
+  el.classList.add('active');
+  showTab('crates');
+  await loadSongs(id);
+}
+
+async function deleteCrate(id) {
+  if(!confirm('Delete this crate?')) return;
+  await fetch(`/api/crates/${id}`,{method:'DELETE'});
+  if(currentCrate===id){currentCrate=null;await loadSongs();}
+  await loadCrates();
+}
+
+// Deletes an entire folder from the Library tab: all songs in it (on disk and
+// in the DB, including crate memberships) plus the now-empty folder itself.
+async function deleteFolder(name){
+  if(!confirm(`Delete the folder "${name}" and ALL songs in it from your library and disk?\n\nThis cannot be undone.`)) return;
+  const resp=await fetch('/api/folder/delete',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({folder:name})});
+  const data=await resp.json();
+  if(data.error){alert(data.error);return;}
+  if(currentFolder===name) currentFolder=null;
+  await loadSongs(currentCrate);
+  await checkDuplicates();
+  if(data.deleted>0) alert(`Deleted ${data.deleted} song(s) from "${name}".`);
+  else alert(`"${name}" had no songs left in the library.`);
+}
+
+// -- SYNC TO MIXXX ---------------------------------------------------------
+// Sends this crate's current song list to the backend, which writes it
+// directly into Mixxx's own database as a real crate. Mixxx must be closed
+// for this to work safely -- the backend checks and refuses otherwise.
+async function syncCrateToMixxx(crateId) {
+  const btn = document.getElementById(`sync-btn-${crateId}`);
+  const originalText = btn.textContent;
+  btn.textContent = '…';
+  btn.style.opacity = '0.5';
+
+  const resp = await fetch(`/api/crates/${crateId}/sync-mixxx`, { method: 'POST' });
+  const data = await resp.json();
+
+  btn.textContent = originalText;
+  btn.style.opacity = '1';
+
+  if (data.ok) {
+    let msg = `Synced ${data.synced} tracks to Mixxx.`;
+    if (data.not_in_mixxx_library > 0) {
+      msg += `\n\n${data.not_in_mixxx_library} track(s) aren't in Mixxx's library yet -- open Mixxx and let it scan your music folder once, then sync again to include them.`;
+    }
+    alert(msg);
+  } else {
+    alert('Sync failed: ' + (data.error || 'unknown error'));
+  }
+}
+
+// -- ADD TO CRATE PICKER ----------------------------------------------------
+// Used from two places:
+// 1. The selection toolbar ("+ Add to Crate") -- adds currently selected songs
+// 2. A folder's "+" button in the Library tab -- adds every song in that folder
+// Only manual (non-smart) crates are shown, since smart crates compute their
+// own membership from rules and can't be manually populated.
+let pendingCrateSongIds = [];
+
+function openAddToCratePicker(explicitIds) {
+  pendingCrateSongIds = explicitIds || [...selectedIds];
+  if (pendingCrateSongIds.length === 0) {
+    alert('No songs selected.');
+    return;
+  }
+  const manualCrates = (window._allCrates || []).filter(c => !c.is_smart);
+  const body = document.getElementById('addToCrateBody');
+  if (manualCrates.length === 0) {
+    body.innerHTML = `
+      <div style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:12px">
+        You don't have any manual crates yet. Create one first (Crates tab → New Crate → Manual).
+      </div>`;
+  } else {
+    body.innerHTML = `
+      <div style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:10px">
+        Adding ${pendingCrateSongIds.length} song(s) to:
+      </div>
+      <div class="nav-list" style="padding:0">
+        ${manualCrates.map(c => `
+          <div class="nav-item" style="padding:8px" onclick="confirmAddToCrate(${c.id}, '${esc(c.name).replace(/'/g,"\\'")}')">
+            <span class="nav-item-label">${esc(c.name)}</span>
+          </div>`).join('')}
+      </div>`;
+  }
+  document.getElementById('addToCrateModal').classList.add('open');
+}
+
+async function confirmAddToCrate(crateId, crateName) {
+  await fetch(`/api/crates/${crateId}/add-songs`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ song_ids: pendingCrateSongIds })
+  });
+  closeAddToCrateModal();
+  clearSelection();
+  alert(`Added to "${crateName}".`);
+}
+
+function closeAddToCrateModal() {
+  document.getElementById('addToCrateModal').classList.remove('open');
+}
+
+// Adds every currently-loaded song inside a given subfolder to a crate.
+// Reuses the same picker -- we just precompute the song ID list from the folder.
+function addFolderToCrate(folderName) {
+  const ids = allSongs
+    .filter(s => s.filepath.includes(MUSIC_DIR + '/' + folderName + '/'))
+    .map(s => s.id);
+  if (ids.length === 0) {
+    alert('No songs found in this folder.');
+    return;
+  }
+  openAddToCratePicker(ids);
+}
+
+// new crate modal
+let ruleCount=0;
+function openNewCrateModal() {
+  editingCrateId=null;
+  document.getElementById('crateModalTitle').textContent='New Crate';
+  document.getElementById('crateName').value='';
+  document.getElementById('ruleRows').innerHTML='';
+  document.getElementById('crateTypeSmart').checked=true;
+  toggleCrateType();
+  ruleCount=0;
+  addRule();
+  document.getElementById('crateModal').classList.add('open');
+}
+
+function addRule() {
+  const id=ruleCount++;
+  const div=document.createElement('div');
+  div.className='rule-row';
+  div.id=`rule-${id}`;
+  div.innerHTML=`
+    <select class="rule-sel" id="rf-${id}" onchange="updateRuleOps(${id})">
+      <option value="bpm">BPM</option>
+      <option value="genre">Genre</option>
+      <option value="musical_key">Key</option>
+      <option value="duration_seconds">Duration (sec)</option>
+      <option value="artist">Artist</option>
+      <option value="year">Year</option>
+    </select>
+    <select class="rule-sel" id="ro-${id}">
+      <option value="gte">≥</option>
+      <option value="lte">≤</option>
+      <option value="eq">=</option>
+      <option value="contains">contains</option>
+    </select>
+    <input class="rule-inp" id="rv-${id}" placeholder="value" list="genreEditList">
+    <button class="rule-del" onclick="document.getElementById('rule-${id}').remove()">✕</button>`;
+  document.getElementById('ruleRows').appendChild(div);
+}
+
+function updateRuleOps(id) {
+  const field=document.getElementById(`rf-${id}`).value;
+  const opSel=document.getElementById(`ro-${id}`);
+  if(['bpm','duration_seconds'].includes(field)){
+    opSel.innerHTML='<option value="gte">≥</option><option value="lte">≤</option><option value="eq">=</option>';
+  } else {
+    opSel.innerHTML='<option value="contains">contains</option><option value="eq">=</option>';
+  }
+}
+
+function toggleCrateType() {
+  const isSmart = document.getElementById('crateTypeSmart').checked;
+  document.getElementById('smartCrateSection').style.display = isSmart ? '' : 'none';
+  document.getElementById('manualCrateSection').style.display = isSmart ? 'none' : '';
+}
+
+async function saveCrate() {
+  const name=document.getElementById('crateName').value.trim()||'New Crate';
+  const isSmart=document.getElementById('crateTypeSmart').checked;
+  const rules=[];
+  if(isSmart){
+    document.querySelectorAll('.rule-row').forEach(row=>{
+      const id=row.id.split('-')[1];
+      const field=document.getElementById(`rf-${id}`)?.value;
+      const op=document.getElementById(`ro-${id}`)?.value;
+      const val=document.getElementById(`rv-${id}`)?.value?.trim();
+      if(field&&op&&val) rules.push({field,op,value:isNaN(val)?val:parseFloat(val)});
+    });
+  }
+  if(editingCrateId){
+    await fetch(`/api/crates/${editingCrateId}`,{method:'PATCH',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({name,rules})});
+  } else {
+    await fetch('/api/crates',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({name,is_smart:isSmart,rules})});
+  }
+  closeCrateModal();
+  await loadCrates();
+}
+
+function closeCrateModal(){document.getElementById('crateModal').classList.remove('open')}
+
+// ── KEY PILLS ─────────────────────────────────────────────────────────────────
+function buildKeyPills(){
+  const c=document.getElementById('keyPills');
+  // Wheel pairs interleaved: 1A, 1B, 2A, 2B, … so each number's relative
+  // A/B pair sits side by side (1A ↔ 1B mix well together).
+  for(let n=1;n<=12;n++) for(const suffix of ['A','B']){
+    const label=`${n}${suffix}`;
+    const btn=document.createElement('button');
+    btn.className='kp';btn.textContent=label;
+    btn.title=fromCamelot(label)||'';
+    btn.onclick=()=>{btn.classList.toggle('active');
+      activeKeys.has(label)?activeKeys.delete(label):activeKeys.add(label);applyFilters();};
+    c.appendChild(btn);
+  }
+}
+
+// ── RANGE SLIDERS ─────────────────────────────────────────────────────────────
+function onRange(){
+  const bMin=+document.getElementById('bpmMin').value;
+  const bMax=+document.getElementById('bpmMax').value;
+  const dMin=+document.getElementById('durMin').value;
+  const dMax=+document.getElementById('durMax').value;
+  bpmActive=!(bMin===60&&bMax===200);
+  durActive=!(dMin===0&&dMax===600);
+  document.getElementById('bpmMinV').textContent=bMin;
+  document.getElementById('bpmMaxV').textContent=bMax;
+  document.getElementById('durMinV').textContent=fmtDur(dMin);
+  document.getElementById('durMaxV').textContent=fmtDur(dMax);
+  applyFilters();
+}
+
+function resetFilters(){
+  document.getElementById('searchInput').value='';
+  ['bpmMin','bpmMax'].forEach((id,i)=>{document.getElementById(id).value=i?200:60});
+  ['durMin','durMax'].forEach((id,i)=>{document.getElementById(id).value=i?600:0});
+  document.getElementById('genreFilter').value='';
+  document.getElementById('bpmMinV').textContent='60';
+  document.getElementById('bpmMaxV').textContent='200';
+  document.getElementById('durMinV').textContent='0:00';
+  document.getElementById('durMaxV').textContent='10:00';
+  bpmActive=false;durActive=false;activeKeys.clear();
+  document.querySelectorAll('.kp').forEach(p=>p.classList.remove('active'));
+  applyFilters();
+}
+
+// ── FILTER + SORT ─────────────────────────────────────────────────────────────
+function getFiltered(){
+  const q=document.getElementById('searchInput').value.toLowerCase().trim();
+  const gq=document.getElementById('genreFilter').value.toLowerCase().trim();
+  const bMin=+document.getElementById('bpmMin').value;
+  const bMax=+document.getElementById('bpmMax').value;
+  const dMin=+document.getElementById('durMin').value;
+  const dMax=+document.getElementById('durMax').value;
+  return allSongs.filter(s=>{
+    if(currentFolder&&!s.filepath.includes(MUSIC_DIR + '/' + currentFolder + '/')) return false;
+    if(q&&![(s.title||''),(s.artist||''),(s.filename||''),(s.genre||'')].some(v=>v.toLowerCase().includes(q))) return false;
+    if(gq&&!(s.genre||'').toLowerCase().includes(gq)) return false;
+    if(bpmActive){if(!s.bpm) return false;if(s.bpm<bMin||s.bpm>bMax) return false;}
+    if(durActive){if(!s.duration_seconds) return false;if(s.duration_seconds<dMin||s.duration_seconds>dMax) return false;}
+    if(activeKeys.size>0&&!activeKeys.has(toCamelot(s.musical_key))) return false;
+    return true;
+  });
+}
+
+function sortBy(field){
+  if(currentSort.field===field) currentSort.asc=!currentSort.asc;
+  else currentSort={field,asc:true};
+  document.querySelectorAll('.col').forEach(el=>{
+    el.classList.remove('sorted');
+    el.querySelector('.sa')?.remove();
+  });
+  const col=document.getElementById(`col-${field}`);
+  if(col){
+    col.classList.add('sorted');
+    const a=document.createElement('span');a.className='sa';
+    a.textContent=currentSort.asc?'↑':'↓';col.appendChild(a);
+  }
+  // Keep the header-click and dropdown sort controls in sync with each other
+  const sel=document.getElementById('sortSelect');
+  if(sel) sel.value=field;
+  applyFilters();
+}
+
+// The dropdown covers fields that don't have a clickable column header
+// (artist, date added) -- reuses the same sort state as column-click sorting
+function sortByDropdown(){
+  const field=document.getElementById('sortSelect').value;
+  // Date added defaults to newest-first since that's almost always what you want
+  const defaultAsc = field==='added_at' ? false : true;
+  if(currentSort.field===field) currentSort.asc=!currentSort.asc;
+  else currentSort={field,asc:defaultAsc};
+  document.querySelectorAll('.col').forEach(el=>{
+    el.classList.remove('sorted');
+    el.querySelector('.sa')?.remove();
+  });
+  const col=document.getElementById(`col-${field}`);
+  if(col){
+    col.classList.add('sorted');
+    const a=document.createElement('span');a.className='sa';
+    a.textContent=currentSort.asc?'↑':'↓';col.appendChild(a);
+  }
+  applyFilters();
+}
+
+function applyFilters(){
+  let songs=getFiltered();
+  const {field,asc}=currentSort;
+  songs.sort((a,b)=>{
+    let va=a[field],vb=b[field];
+    if(va==null) return 1;if(vb==null) return -1;
+    if(field==='musical_key'){              // sort by wheel position, not raw string
+      va=camelotNum(va)??va;vb=camelotNum(vb)??vb;
+    }
+    if(typeof va==='string') va=va.toLowerCase();
+    if(typeof vb==='string') vb=vb.toLowerCase();
+    return asc?(va>vb?1:va<vb?-1:0):(va<vb?1:va>vb?-1:0);
+  });
+  visibleSongs=songs;
+  renderSongs(songs);
+  document.getElementById('visibleCount').textContent=songs.length;
+  document.getElementById('totalCount').textContent=allSongs.length;
+}
+
+// ── RENDER ────────────────────────────────────────────────────────────────────
+// Builds one data cell for a column key -- used by renderSongs so the rows
+// follow the exact same column order as the header. Each cell carries a
+// data-colkey attribute so auto-fit can measure the widest content per column.
+function cellForColumn(key, s, v) {
+  switch (key) {
+    case 'title':
+      return `<div class="sinfo" data-colkey="title">
+        <div class="stitle">${v.title}</div>
+        <div class="sartist">${v.artist}</div>
+      </div>`;
+    case 'genre':
+      return `<div class="gc${v.genre?'':' empty'}" data-colkey="genre" id="genre-${s.id}"
+        onclick="event.stopPropagation();startGenreEdit(${s.id})"
+        title="Click to edit">${v.genre||'+'}</div>`;
+    case 'bpm':
+      return `<div class="sbpm" data-colkey="bpm">${v.bpm}</div>`;
+    case 'musical_key':
+      return `<div class="skey" data-colkey="musical_key">${v.key}</div>`;
+    case 'duration_seconds':
+      return `<div class="sdur" data-colkey="duration_seconds">${v.dur}</div>`;
+    case 'file_size_bytes':
+      return `<div class="sdur" data-colkey="file_size_bytes" style="color:var(--muted)">${v.size}</div>`;
+  }
+  return '';
+}
+
+function renderSongs(songs){
+  const rows=document.getElementById('songRows');
+  if(!rows) return;
+  if(!songs.length){
+    rows.innerHTML=`<div class="empty"><div class="empty-icon">♫</div><div>No tracks match</div></div>`;
+    return;
+  }
+  rows.innerHTML=songs.map((s,i)=>{
+    const title=esc(s.title||cleanName(s.filename));
+    const artist=esc(s.artist||'—');
+    const genre=s.genre?esc(s.genre):null;
+    const bpm=s.bpm?Math.round(s.bpm):'—';
+    const key=esc(toCamelot(s.musical_key)||s.musical_key||'—');
+    const dur=fmtDur(s.duration_seconds);
+    const size=fmtSize(s.file_size_bytes);
+    const fp=esc(s.filepath);
+    const sel=selectedIds.has(s.id);
+    const v={title,artist,genre,bpm,key,dur,size};
+    const dataCells=columnOrder.map(k=>cellForColumn(k,s,v)).join('');
+    return `
+      <div class="song-row${sel?' selected':''}" id="row-${s.id}"
+        onclick="onRowClick(event,${s.id})"
+        ondblclick="onRowDoubleClick(event,${s.id})"
+        oncontextmenu="openInfoModal([${s.id}],event)">
+        <div class="row-cb" id="cb-${s.id}"></div>
+        <div class="si2">${i+1}</div>
+        ${dataCells}
+        <div class="row-acts" onclick="event.stopPropagation()">
+          <button class="show-btn" onclick="revealInFinder('${fp.replace(/'/g,"\\'")}')">Show</button>
+          <button class="del-btn" onclick="deleteSong(${s.id},'${title}')">✕</button>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+// ── SELECTION (Cmd+click) ─────────────────────────────────────────────────────
+function onRowClick(event, songId){
+  if(event.metaKey||event.ctrlKey){
+    event.preventDefault();
+    if(selectedIds.has(songId)) selectedIds.delete(songId);
+    else selectedIds.add(songId);
+    updateRowSelection(songId);
+    updateSelectionBar();
+  }
+  // Plain single click no longer opens Finder (too easy to trigger by accident).
+  // Double-click reveals the file instead.
+}
+
+function onRowDoubleClick(event, songId){
+  // Ignore double-clicks landing on the row's own buttons/cells
+  if(event.target.closest('.row-acts')||event.target.classList.contains('gc')
+      ||event.target.classList.contains('ge')) return;
+  const song=allSongs.find(s=>s.id===songId);
+  if(song) revealInFinder(song.filepath);
+}
+
+document.addEventListener('keydown', e=>{
+  if((e.metaKey||e.ctrlKey)&&e.key==='a'){
+    e.preventDefault();
+    visibleSongs.forEach(s=>selectedIds.add(s.id));
+    document.querySelectorAll('.song-row').forEach(r=>{
+      r.classList.add('selected');
+    });
+    updateSelectionBar();
+  }
+  if(e.key==='Escape') clearSelection();
+});
+
+function updateRowSelection(songId){
+  const row=document.getElementById(`row-${songId}`);
+  const cb=document.getElementById(`cb-${songId}`);
+  if(!row||!cb) return;
+  const sel=selectedIds.has(songId);
+  row.classList.toggle('selected',sel);
+}
+
+function updateSelectionBar(){
+  const bar=document.getElementById('selBar');
+  const count=selectedIds.size;
+  if(count>0){
+    bar.classList.add('visible');
+    document.getElementById('selCount').textContent=`${count} selected`;
+    const mb=document.getElementById('mergeSelBtn');
+    if(mb) mb.style.display = count>=2 ? '' : 'none';
+  } else {
+    bar.classList.remove('visible');
+  }
+}
+
+async function mergeSelected(){
+  const ids=[...selectedIds];
+  if(ids.length<2) return;
+  await openMerge(ids);
+  // Selection is cleared only once the merge actually succeeds (confirmMerge),
+  // so cancelling or a failed preview leaves the picks intact for retry.
+}
+
+function clearSelection(){
+  selectedIds.clear();
+  document.querySelectorAll('.song-row').forEach(r=>r.classList.remove('selected'));
+  updateSelectionBar();
+}
+
+async function deleteSelected(){
+  if(!confirm(`Delete ${selectedIds.size} songs from library and disk?`)) return;
+  for(const id of selectedIds){
+    await fetch(`/api/songs/${id}`,{method:'DELETE'});
+  }
+  selectedIds.clear();
+  updateSelectionBar();
+  await loadSongs(currentCrate);
+  await checkDuplicates();
+}
+
+// ── INLINE GENRE EDIT ─────────────────────────────────────────────────────────
+function startGenreEdit(songId){
+  const cell=document.getElementById(`genre-${songId}`);
+  if(!cell) return;
+  const song=allSongs.find(s=>s.id===songId);
+  const cur=song?.genre||'';
+  cell.innerHTML=`<input class="ge" id="gi-${songId}" value="${esc(cur)}" list="genreEditList"
+    onclick="event.stopPropagation()"
+    onkeydown="if(event.key==='Enter')saveGenre(${songId});if(event.key==='Escape')applyFilters();"
+    onblur="saveGenre(${songId})">`;
+  const inp=document.getElementById(`gi-${songId}`);
+  inp.focus();inp.select();
+}
+
+async function saveGenre(songId){
+  const inp=document.getElementById(`gi-${songId}`);
+  if(!inp) return;
+  const genre=inp.value.trim();
+  await fetch(`/api/songs/${songId}`,{method:'PATCH',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({genre})});
+  const song=allSongs.find(s=>s.id===songId);
+  if(song) song.genre=genre;
+  await loadGenreSuggestions();
+  applyFilters();
+}
+
+// ── INFO / BATCH EDIT MODAL ───────────────────────────────────────────────────
+async function openInfoModal(ids, event){
+  if(event) {event.preventDefault();event.stopPropagation();}
+
+  const targetIds = selectedIds.size > 1 ? [...selectedIds] : ids;
+  isBatchEdit = targetIds.length > 1;
+
+  const firstSong = allSongs.find(s=>s.id===targetIds[0]);
+  currentSong = isBatchEdit ? null : firstSong;
+
+  document.getElementById('infoTitle').textContent =
+    isBatchEdit ? `Edit ${targetIds.length} songs` : (firstSong?.title||firstSong?.filename||'Song Info');
+
+  const note=document.getElementById('batchNote');
+  note.style.display=isBatchEdit?'block':'none';
+  note.textContent=`Editing ${targetIds.length} songs. Leave a field blank to keep each song's current value.`;
+
+  document.getElementById('infoModal').dataset.ids = JSON.stringify(targetIds);
+
+  const fields=[
+    {key:'title',  label:'Title',  val:isBatchEdit?'':(firstSong?.title||'')},
+    {key:'artist', label:'Artist', val:isBatchEdit?'':(firstSong?.artist||'')},
+    {key:'album',  label:'Album',  val:isBatchEdit?'':(firstSong?.album||'')},
+    {key:'year',   label:'Year',   val:isBatchEdit?'':(firstSong?.year||'')},
+    {key:'genre',  label:'Genre',  val:isBatchEdit?'':(firstSong?.genre||''), list:'genreEditList'},
+    {key:'bpm',    label:'BPM',    val:isBatchEdit?'':(firstSong?.bpm?Math.round(firstSong.bpm):'')},
+    {key:'musical_key',label:'Key',val:isBatchEdit?'':(toCamelot(firstSong?.musical_key)||firstSong?.musical_key||'')},
+  ];
+
+  document.getElementById('infoGrid').innerHTML = fields.map(f=>`
+    <div class="il">${f.label}</div>
+    <input class="ii" id="info-${f.key}" value="${esc(String(f.val))}"
+      placeholder="${isBatchEdit?'Leave blank to keep current':''}"
+      ${f.list?`list="${f.list}"`:''}>`
+  ).join('') + (!isBatchEdit ? `
+    <div class="il">Duration</div>
+    <div style="font-family:var(--mono);font-size:12px;color:var(--muted)">${fmtDur(firstSong?.duration_seconds)}</div>
+    <div class="il">Size</div>
+    <div style="font-family:var(--mono);font-size:12px;color:var(--muted)">${fmtSize(firstSong?.file_size_bytes)}</div>
+    <div class="il">File</div>
+    <div class="ipath">${esc(firstSong?.filepath||'')}</div>` : '');
+
+  const finderBtn=document.getElementById('infoFinderBtn');
+  finderBtn.style.display=isBatchEdit?'none':'';
+
+  // Open the modal immediately -- transitions render in when they arrive, so
+  // a slow fetch can never make right-click feel laggy.
+  window._editingTransId=null;
+  document.getElementById('infoModal').classList.add('open');
+  renderTransitionsSection(isBatchEdit ? null : firstSong?.id);
+}
+
+async function saveInfo(){
+  const ids=JSON.parse(document.getElementById('infoModal').dataset.ids||'[]');
+  const updates={};
+  ['title','artist','album','year','genre','bpm','musical_key'].forEach(k=>{
+    const el=document.getElementById(`info-${k}`);
+    if(el&&el.value.trim()!=='') updates[k]=el.value.trim();
+  });
+  if(updates.bpm) updates.bpm=parseFloat(updates.bpm)||null;
+  if(updates.musical_key) updates.musical_key=fromCamelot(updates.musical_key)||updates.musical_key;
+
+  if(ids.length>1){
+    await fetch('/api/songs/batch',{method:'PATCH',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ids,...updates})});
+  } else if(ids.length===1){
+    await fetch(`/api/songs/${ids[0]}`,{method:'PATCH',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(updates)});
+    Object.assign(allSongs.find(s=>s.id===ids[0])||{},updates);
+  }
+  closeInfoModal();
+  clearSelection();
+  await loadGenreSuggestions();
+  await loadSongs(currentCrate);
+}
+
+function openBatchEdit(){
+  openInfoModal([...selectedIds]);
+}
+
+function closeInfoModal(){
+  document.getElementById('infoModal').classList.remove('open');
+  currentSong=null;isBatchEdit=false;
+  window._editingTransId=null;
+}
+
+// ── TRANSITIONS ───────────────────────────────────────────────────────────────
+// A transition is a directional mix note: "this song goes INTO that one".
+// Targets are either library songs (to_song_id) or text-only track names
+// (to_text) for things you don't own yet. The full view lives inside the
+// Song Info modal (right-click any row); the sidebar tab is the browse-all.
+let pendingTransitionFromId = null;
+let pendingTransitionToId   = null;
+
+async function renderTransitionsSection(songId){
+  const wrap=document.getElementById('transitionsSection');
+  if(!wrap) return;
+  if(!songId||isBatchEdit){ wrap.style.display='none'; return; }
+  wrap.style.display='';
+  let data;
+  try{
+    const resp=await fetch(`/api/songs/${songId}/transitions`);
+    data=await resp.json();
+  }catch(e){
+    wrap.innerHTML='<div class="ts-empty">Could not load transitions.</div>';
+    return;
+  }
+  window._curTrans=data;
+  const out=data.outgoing||[], inc=data.incoming||[];
+  const editing=window._editingTransId;
+  const outHtml=out.map(t=>editing===t.id?transEditHtml(t):transRowHtml(t,'out')).join('')
+    || '<div class="ts-empty">No transitions from this song yet — click “+ Add” to link it to the next track.</div>';
+  const incHtml=inc.map(t=>editing===t.id?transEditHtml(t):transRowHtml(t,'in')).join('')
+    || '<div class="ts-empty">Nothing mixes into this song yet.</div>';
+  wrap.innerHTML=`
+    <div class="ts-hdr">
+      <span class="ts-title">⇄ Transitions</span>
+      <button class="btn-sel" onclick="openAddTransitionModal(${songId})">+ Add</button>
+    </div>
+    <div class="ts-group-label">From this song (${out.length})</div>
+    ${outHtml}
+    <div class="ts-group-label">Into this song (${inc.length})</div>
+    ${incHtml}`;
+}
+
+// One transition row in the info modal. dir='out' means "from this song → target",
+// dir='in' means "source → this song". Library targets are clickable and jump
+// to the song; text-only targets show an italic name + a "not in library" badge.
+function transRowHtml(t, dir){
+  const isOut = dir==='out';
+  const arrow = isOut ? '→' : '←';
+  const target = isOut
+    ? (t.to_song_id
+        ? `<span class="ts-click" title="Jump to this song" onclick="jumpToSong(${t.to_song_id})">${esc(t.to_title||t.to_filename||'?')}</span>
+           <span class="ts-artist">— ${esc(t.to_artist||'?')}</span>`
+        : `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.to_text||'Untitled track')}</span>
+           <span class="ts-notlib">not in library</span>`)
+    : `<span class="ts-click" title="Jump to this song" onclick="jumpToSong(${t.from_song_id})">${esc(t.from_title||t.from_filename||'?')}</span>
+       <span class="ts-artist">— ${esc(t.from_artist||'?')}</span>`;
+  const notes = t.notes ? `<div class="ts-notes">${esc(t.notes)}</div>` : '';
+  const tag = t.tag ? `<span class="ts-tag">${esc(t.tag)}</span>` : '';
+  const reverseBtn = (isOut && t.to_song_id)
+    ? `<button class="ts-act" title="Add the reverse link (target → this song)" onclick="addReverseTransition(${t.id})">⇄</button>`
+    : '';
+  return `
+    <div class="ts-row" id="trow-${t.id}">
+      <div class="ts-arrow${isOut?'':' in'}">${arrow}</div>
+      <div class="ts-info">
+        <div class="ts-name">${target}${tag}</div>
+        ${notes}
+      </div>
+      <div class="ts-acts">
+        <button class="ts-act" title="Edit notes / tag"
+          onclick="window._editingTransId=${t.id};renderTransitionsSection(currentSong.id)">✎</button>
+        ${reverseBtn}
+        <button class="ts-act del" title="Delete transition" onclick="deleteTransition(${t.id})">✕</button>
+      </div>
+    </div>`;
+}
+
+// Inline edit form (notes + tag) that replaces a row while editing.
+function transEditHtml(t){
+  return `
+    <div class="ts-row" id="trow-${t.id}">
+      <div class="ts-arrow">✎</div>
+      <div class="ts-edit">
+        <input class="ii" id="te-notes-${t.id}" placeholder="Notes — technique, timing…"
+          value="${esc(t.notes||'')}" style="flex:1;min-width:150px">
+        <input class="ii" id="te-tag-${t.id}" placeholder="Tag (e.g. energy +1)"
+          value="${esc(t.tag||'')}" style="width:130px">
+        <button class="btn-sel" onclick="saveTransitionEdit(${t.id})">Save</button>
+        <button class="btn-sel"
+          onclick="window._editingTransId=null;renderTransitionsSection(currentSong.id)">Cancel</button>
+      </div>
+    </div>`;
+}
+
+async function saveTransitionEdit(id){
+  const notes=document.getElementById(`te-notes-${id}`)?.value.trim()||'';
+  const tag=document.getElementById(`te-tag-${id}`)?.value.trim()||'';
+  await fetch(`/api/transitions/${id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({notes,tag})});
+  window._editingTransId=null;
+  if(currentSong) renderTransitionsSection(currentSong.id);
+  if(document.getElementById('tab-transitions').classList.contains('active')) renderTransitionTab();
+}
+
+async function deleteTransition(id){
+  if(!confirm('Delete this transition?')) return;
+  await fetch(`/api/transitions/${id}`,{method:'DELETE'});
+  if(currentSong) renderTransitionsSection(currentSong.id);
+  if(document.getElementById('tab-transitions').classList.contains('active')) renderTransitionTab();
+}
+
+// Mirrors a library→library link the other way around, copying notes/tag.
+async function addReverseTransition(id){
+  const t=(window._curTrans?.outgoing||[]).find(x=>x.id===id);
+  if(!t||!t.to_song_id) return;
+  const resp=await fetch(`/api/songs/${t.to_song_id}/transitions`,{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({to_song_id:currentSong?.id,notes:t.notes||'',tag:t.tag||''})});
+  const data=await resp.json();
+  if(data.error){alert(data.error);return;}
+  renderTransitionsSection(currentSong.id);
+  if(document.getElementById('tab-transitions').classList.contains('active')) renderTransitionTab();
+}
+
+// -- ADD TRANSITION PICKER ---------------------------------------------------
+async function openAddTransitionModal(sourceId){
+  // Always refresh the picker list so freshly downloaded songs show up
+  window._atAllSongs=await (await fetch('/api/songs')).json();
+  pendingTransitionFromId=sourceId||null;
+  pendingTransitionToId=null;
+  const fixedFrom=sourceId ? window._atAllSongs.find(s=>s.id===sourceId) : null;
+  const body=document.getElementById('addTransitionBody');
+  body.innerHTML=`
+    ${fixedFrom
+      ? `<div class="ts-group-label">From</div>
+         <div class="ts-row"><div class="ts-arrow">♪</div>
+           <div class="ts-info"><div class="ts-name">${esc(fixedFrom.title||fixedFrom.filename)}
+             <span class="ts-artist">— ${esc(fixedFrom.artist||'?')}</span></div></div></div>`
+      : `<div class="ts-group-label">From (source song)</div>
+         <input class="ii" id="atFromSearch" placeholder="Search source song…"
+           oninput="atRenderList('atFromList','atFromSearch',true)" style="width:100%;margin-bottom:6px">
+         <div class="nav-list" id="atFromList" style="padding:0;max-height:150px;overflow-y:auto;
+           border:1px solid var(--border);border-radius:8px"></div>`}
+    <div class="ts-group-label" style="margin-top:12px">To (target)</div>
+    <input class="ii" id="atSearch" placeholder="Search library for the target song…"
+      oninput="atRenderList('atSongList','atSearch',false)" style="width:100%;margin-bottom:6px">
+    <div class="nav-list" id="atSongList" style="padding:0;max-height:150px;overflow-y:auto;
+      border:1px solid var(--border);border-radius:8px"></div>
+    <div style="margin:12px 0;display:flex;align-items:center;gap:8px;color:var(--muted2);
+      font-family:var(--mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase">
+      <div style="flex:1;height:1px;background:var(--border)"></div>or a text-only track
+      <div style="flex:1;height:1px;background:var(--border)"></div>
+    </div>
+    <input class="ii" id="atText" placeholder="Track name — e.g. “that edit from the club night”"
+      style="width:100%;margin-bottom:8px" oninput="onTransitionTextInput()">
+    <div style="display:flex;gap:8px">
+      <input class="ii" id="atNotes" placeholder="Notes — technique, timing…" style="flex:1">
+      <input class="ii" id="atTag" placeholder="Tag (e.g. energy +1)" style="width:140px">
+    </div>
+    <div style="margin-top:14px;display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn-ghost" style="width:auto;margin:0" onclick="closeAddTransitionModal()">Cancel</button>
+      <button class="btn-save" onclick="confirmAddTransition()">Add Transition</button>
+    </div>`;
+  if(!fixedFrom) atRenderList('atFromList','atFromSearch',true);
+  atRenderList('atSongList','atSearch',false);
+  document.getElementById('addTransitionModal').classList.add('open');
+}
+
+// Shared renderer for the From and To song lists inside the picker.
+function atRenderList(listId, searchId, isFrom){
+  const q=(document.getElementById(searchId)?.value||'').toLowerCase().trim();
+  const list=document.getElementById(listId);
+  if(!list) return;
+  const songs=(window._atAllSongs||[]).filter(s=>{
+    if(pendingTransitionFromId && !isFrom && s.id===pendingTransitionFromId) return false;
+    return !q || (s.title||'').toLowerCase().includes(q)
+      || (s.artist||'').toLowerCase().includes(q)
+      || (s.filename||'').toLowerCase().includes(q);
+  }).slice(0,80);
+  list.innerHTML=songs.map(s=>{
+    const active=isFrom ? pendingTransitionFromId===s.id : pendingTransitionToId===s.id;
+    return `<div class="nav-item ${active?'active':''}" id="${listId}-${s.id}"
+        onclick="${isFrom?'pickFromSong':'pickToSong'}(${s.id},this)">
+        <span class="nav-item-label">${esc(s.title||cleanName(s.filename))}
+          <span style="color:var(--muted2);font-size:9.5px">— ${esc(s.artist||'?')}</span></span>
+      </div>`;
+  }).join('') || '<div class="ts-empty" style="padding:8px 6px">No songs match</div>';
+}
+
+function pickFromSong(id, el){
+  pendingTransitionFromId=id;
+  document.querySelectorAll('#atFromList .nav-item').forEach(n=>n.classList.remove('active'));
+  el.classList.add('active');
+}
+function pickToSong(id, el){
+  pendingTransitionToId=id;
+  document.querySelectorAll('#atSongList .nav-item').forEach(n=>n.classList.remove('active'));
+  el.classList.add('active');
+}
+
+// Typing a text-only target deselects the picked library target
+function onTransitionTextInput(){
+  if(document.getElementById('atText')?.value.trim()){
+    pendingTransitionToId=null;
+    document.querySelectorAll('#atSongList .nav-item').forEach(n=>n.classList.remove('active'));
+  }
+}
+
+async function confirmAddTransition(){
+  if(!pendingTransitionFromId){ alert('Pick the source song first.'); return; }
+  const toSong=pendingTransitionToId;
+  const toText=document.getElementById('atText')?.value.trim();
+  if(!toSong&&!toText){ alert('Pick a target song or enter a track name.'); return; }
+  const notes=document.getElementById('atNotes')?.value.trim();
+  const tag=document.getElementById('atTag')?.value.trim();
+  const resp=await fetch(`/api/songs/${pendingTransitionFromId}/transitions`,{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({to_song_id:toSong||undefined,to_text:toText||undefined,notes,tag})});
+  const data=await resp.json();
+  if(data.error){ alert(data.error); return; }
+  closeAddTransitionModal();
+  if(currentSong && document.getElementById('infoModal').classList.contains('open'))
+    renderTransitionsSection(currentSong.id);
+  if(document.getElementById('tab-transitions').classList.contains('active')) renderTransitionTab();
+}
+
+function closeAddTransitionModal(){
+  document.getElementById('addTransitionModal').classList.remove('open');
+  pendingTransitionFromId=null; pendingTransitionToId=null;
+}
+
+// -- TRANSITIONS → MIXXX COMMENTS -------------------------------------------
+// Writes each song's outgoing transition notes into its Mixxx comment field.
+// The backend refuses while Mixxx is open, backs up Mixxx's DB, and reports
+// how many songs were written / cleared / not found in Mixxx's library.
+async function syncTransitionsToMixxx(){
+  if(!confirm('Write each song\'s outgoing transition notes into its Mixxx comment?\n\nMixxx must be closed for this to work — the app refuses otherwise.')) return;
+  const resp=await fetch('/api/transitions/sync-mixxx',{method:'POST'});
+  const data=await resp.json();
+  if(data.ok){
+    let msg=`Synced ${data.synced} song${data.synced===1?'':'s'} to Mixxx comments.`;
+    if(data.cleared>0) msg+=`\nCleared stale transition notes from ${data.cleared} track(s).`;
+    if(data.not_in_mixxx_library>0) msg+=`\n\n${data.not_in_mixxx_library} song(s) with transitions aren't in Mixxx's library yet — open Mixxx once so it scans your music folder, then sync again to include them.`;
+    alert(msg);
+  }else{
+    alert('Sync failed: '+(data.error||'unknown error'));
+  }
+}
+
+// -- TRANSITIONS EXPORT ------------------------------------------------------
+// Downloads every transition as a CSV (Excel-friendly) via a blob link.
+async function exportTransitionsCsv(){
+  try{
+    const resp=await fetch('/api/transitions/export');
+    if(!resp.ok){ alert('Export failed: '+resp.status); return; }
+    const blob=await resp.blob();
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url; a.download='transitions.csv';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),1000);
+  }catch(e){ alert('Export failed: '+e.message); }
+}
+
+// -- TRANSITIONS SIDEBAR TAB -------------------------------------------------
+// All links grouped by source song, newest first, with jump-to-song and delete.
+async function renderTransitionTab(){
+  const list=document.getElementById('transitionList');
+  if(!list) return;
+  let transitions=[];
+  try{
+    transitions=await (await fetch('/api/transitions')).json();
+  }catch(e){ list.innerHTML='<div class="ts-empty" style="padding:10px 6px">Could not load transitions.</div>'; return; }
+  if(!transitions.length){
+    list.innerHTML='<div class="ts-empty" style="padding:10px 6px">No transitions yet. Right-click a song in the library → Transitions → “+ Add”.</div>';
+    return;
+  }
+  const groups={};
+  transitions.forEach(t=>{ (groups[t.from_song_id]=groups[t.from_song_id]||[]).push(t); });
+  list.innerHTML=Object.entries(groups).map(([sid,ts])=>{ const src=ts[0]; return `
+    <div class="ts-tab-group">
+      <div class="ts-tab-src" title="Jump to this song" onclick="jumpToSong(${sid})">
+        <span class="nav-item-label">${esc(src.from_title||src.from_filename||'?')} — ${esc(src.from_artist||'?')}</span>
+        <span class="ts-tab-count">${ts.length}</span>
+      </div>
+      ${ts.map(t=>{
+        const target=t.to_song_id
+          ? `<span class="ts-tab-target" title="Jump to this song" onclick="jumpToSong(${t.to_song_id})">${esc(t.to_title||t.to_filename||'?')}</span>`
+          : `<span class="ts-tab-target noclick" title="Not in your library">${esc(t.to_text||'Untitled track')}</span>`;
+        return `<div class="ts-tab-row"><span class="ts-arrow">→</span>${target}
+          ${t.tag?`<span class="ts-tag">${esc(t.tag)}</span>`:''}
+          <button class="nav-item-del" title="Delete transition" onclick="deleteTransition(${t.id})">✕</button>
+        </div>`;
+      }).join('')}
+    </div>`;
+  }).join('');
+}
+
+// Jump to a song in the library and pulse-highlight its row
+async function jumpToSong(id){
+  closeInfoModal();
+  document.getElementById('addTransitionModal').classList.remove('open');
+  currentCrate=null; currentFolder=null;
+  showTab('library');
+  document.querySelectorAll('.nav-item').forEach(e=>e.classList.remove('active'));
+  const allItem=document.querySelector('#folderList .nav-item');
+  if(allItem) allItem.classList.add('active');
+  await loadSongs();
+  const row=document.getElementById(`row-${id}`);
+  if(row){
+    row.scrollIntoView({block:'center'});
+    row.classList.remove('flash'); void row.offsetWidth; row.classList.add('flash');
+    setTimeout(()=>row.classList.remove('flash'),1400);
+  }
+}
+
+// ── DOWNLOAD ──────────────────────────────────────────────────────────────────
+async function startDownload(){
+  const query=document.getElementById('downloadInput').value.trim();
+  const subfolder=document.getElementById('folderInput').value.trim()||null;
+  if(!query) return;
+
+  const lines = query.split('\n').filter(l => l.trim());
+  const isMultiLine = lines.length > 1;
+  const isSpotifyTrackList = isMultiLine &&
+    lines.every(l => l.trim().startsWith('https://open.spotify.com/track/'));
+  const isSpotifyLink = lines.length === 1 &&
+    query.startsWith('https://open.spotify.com/');
+
+  if(isSpotifyTrackList){
+    await startSpotifyListDownload(lines.map(l=>l.trim()), subfolder);
+    return;
+  }
+
+  if(isMultiLine && !isSpotifyLink){
+    await startBatchDownload(query, subfolder, lines.length);
+    return;
+  }
+
+  setStatus('downloading','Starting…');
+  const resp=await fetch('/api/download',{method:'POST',
+    headers:{'Content-Type':'application/json'},body:JSON.stringify({query,subfolder})});
+  const data=await resp.json();
+
+  if(data.status==='failed'){
+    setStatus('failed',data.error||'Failed');return;
+  }
+
+  if(data.total!==undefined){
+    const name=data.playlist_name||'Playlist';
+    setStatus('downloading',`"${name}": ${data.downloading} new / ${data.already_have} owned`);
+    const pid=setInterval(()=>loadSongs(currentCrate),8000);
+    setTimeout(()=>{clearInterval(pid);setStatus('success',`${name} done ✓`);loadSongs(currentCrate);},
+      Math.max(data.downloading*35000,10000));
+    return;
+  }
+
+  if(data.status==='queued'){
+    const jobId=data.track?.id||data.job_id;
+    if(!jobId){setStatus('failed','No job ID');return;}
+    setStatus('downloading',`Downloading: ${data.track?.title||query}`);
+    statusPoll=setInterval(async()=>{
+      const s=await fetch(`/api/download-status/${encodeURIComponent(jobId)}`).then(r=>r.json());
+      if(s.status==='success'){
+        clearInterval(statusPoll);setStatus('success','Downloaded ✓');
+        document.getElementById('downloadInput').value='';
+        await loadSongs(currentCrate);await checkDuplicates();
+      } else if(s.status==='duplicate'){
+        clearInterval(statusPoll);setStatus('duplicate','Already owned');
+      } else if(s.status==='failed'){
+        clearInterval(statusPoll);setStatus('failed','Download failed');
+      }
+    },2000);
+  }
+}
+
+async function startSpotifyListDownload(urls, subfolder){
+  setStatus('downloading', `Queuing ${urls.length} Spotify tracks…`);
+
+  const resp = await fetch('/api/download-spotify-list', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ urls, subfolder })
+  });
+  const data = await resp.json();
+
+  if(data.error){ setStatus('failed', data.error); return; }
+
+  setStatus('downloading', `0 / ${data.total} downloaded…`);
+  document.getElementById('downloadInput').value = '';
+
+  const batchId = data.batch_id;
+  statusPoll = setInterval(async () => {
+    const s = await fetch(`/api/download-status/batch/${batchId}`).then(r=>r.json());
+    const done = (s.done||0);
+    const dupes = (s.duplicate||0);
+    const total = data.total;
+    if(s.status === 'success'){
+      clearInterval(statusPoll);
+      setStatus('success', `Done — ${done} new, ${dupes} already owned`);
+      await loadSongs(currentCrate);
+      await checkDuplicates();
+    } else {
+      setStatus('downloading', `${done + dupes} / ${total} processed (${dupes} already owned)…`);
+      await loadSongs(currentCrate);
+    }
+  }, 10000);
+}
+
+async function startBatchDownload(text, subfolder, lineCount){
+  setStatus('downloading',`Parsing ${lineCount} tracks…`);
+
+  const resp = await fetch('/api/download-list',{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({text, subfolder})});
+  const data = await resp.json();
+
+  if(data.error){
+    setStatus('failed', data.error); return;
+  }
+
+  const preview = data.preview?.slice(0,3).join(', ') || '';
+  setStatus('downloading',
+    `Queued ${data.tracks} tracks — downloading in background. First: ${preview}…`);
+
+  document.getElementById('downloadInput').value='';
+
+  const batchId = data.batch_id;
+  statusPoll = setInterval(async()=>{
+    const s = await fetch(`/api/download-status/batch/${batchId}`).then(r=>r.json());
+    if(s.status==='success'){
+      clearInterval(statusPoll);
+      setStatus('success',`Done — ${s.done} downloaded, ${s.failed} failed`);
+      await loadSongs(currentCrate); await checkDuplicates();
+    } else if(s.status==='downloading'){
+      setStatus('downloading',`${s.done||0} / ${s.total||data.tracks} done…`);
+      await loadSongs(currentCrate);
+    }
+  }, 8000);
+}
+
+function setStatus(type,text){
+  const p=document.getElementById('dlStatus');
+  p.className=`sp ${type}`;
+  document.getElementById('dlStatusText').textContent=text;
+  p.querySelector('.dot').classList.toggle('pulse',type==='downloading');
+}
+
+// ── DELETE ────────────────────────────────────────────────────────────────────
+async function deleteSong(id,title){
+  if(!confirm(`Delete "${title}"?`)) return;
+  await fetch(`/api/songs/${id}`,{method:'DELETE'});
+  await loadSongs(currentCrate);await checkDuplicates();
+}
+
+async function revealInFinder(filepath){
+  if(!filepath) return;
+  await fetch('/api/reveal',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({filepath})});
+}
+
+// ── DUPLICATES ────────────────────────────────────────────────────────────────
+async function checkDuplicates(){
+  const resp=await fetch('/api/duplicates');
+  const dupes=await resp.json();
+  document.getElementById('dupeCount').textContent=dupes.length;
+}
+
+async function openDupeModal(){
+  document.getElementById('dupeModal').classList.add('open');
+  const body=document.getElementById('dupeModalBody');
+  body.innerHTML='<div style="color:var(--muted);font-size:13px">Scanning…</div>';
+  const resp=await fetch('/api/duplicates');
+  const groups=await resp.json();
+  window._dupeGroups = groups;   // openMergePreview() reads groups by index from here
+  // Only offer bulk-merge when there's actually something to merge
+  const mergeAllBtn=document.getElementById('mergeAllBtn');
+  if(mergeAllBtn) mergeAllBtn.style.display = groups.length ? '' : 'none';
+  if(!groups.length){body.innerHTML='<div style="color:var(--muted);font-size:13px;padding:8px 0">Library is clean ✓</div>';return;}
+  body.innerHTML=groups.map((g,gi)=>`
+    <div class="dg" id="dupe-group-${gi}">
+      <div class="dgl"><span class="dbadge ${g.type}">${g.type==='exact'?'EXACT COPY':(g.type==='name'?'SAME NAME':'SAME SONG')}</span>Keep one, delete the other
+        <button class="bdm" onclick="openMergePreview(${gi})">⇄ Merge…</button>
+      </div>
+      ${g.songs.map(s=>`
+        <div class="df">
+          <div class="dfi">
+            <div class="dfn" title="${esc(s.filepath)}">${esc(s.filename||s.filepath.split('/').pop())}</div>
+            <div class="dfm">${esc(s.artist||'—')} · ${fmtDur(s.duration_seconds)} · ${fmtSize(s.file_size_bytes)}</div>
+          </div>
+          <div class="dfa">
+            <button class="br" onclick="revealInFinder('${esc(s.filepath).replace(/'/g,"\\'")}')">Show</button>
+            <button class="bdd" onclick="deleteDupe(${s.id},${gi})">Delete</button>
+          </div>
+        </div>`).join('')}
+    </div>`).join('');
+}
+
+async function deleteDupe(id,gi){
+  const song=allSongs.find(s=>s.id===id);
+  if(!confirm(`Delete "${song?.filename||'this file'}"?`)) return;
+  await fetch(`/api/songs/${id}`,{method:'DELETE'});
+  await loadSongs(currentCrate);await checkDuplicates();
+  // Re-render the modal so window._dupeGroups and the group indices that
+  // openMergePreview(gi) relies on stay in sync with the server.
+  openDupeModal();
+}
+
+function closeDupeModal(){document.getElementById('dupeModal').classList.remove('open')}
+
+// Merges EVERY duplicate group in one pass, skipping the per-group preview.
+// Each group keeps its highest-quality file (same logic as the individual
+// Merge button: highest bitrate, tie-broken by file size) and deletes the rest.
+async function mergeAllDuplicates(){
+  if(!window._dupeGroups || !window._dupeGroups.length) return;
+  const exact = window._dupeGroups.filter(g=>g.type==='exact').length;
+  const name  = window._dupeGroups.filter(g=>g.type==='name').length;
+  const fuzzy = window._dupeGroups.length - exact - name;
+  if(!confirm(`Merge ALL ${window._dupeGroups.length} duplicate group(s)?\n` +
+    `${exact} exact copy, ${name} same-name, ${fuzzy} same-song.\n\n` +
+    `Each group keeps its highest-quality file and deletes the rest. This cannot be undone.`)) return;
+
+  const btn=document.getElementById('mergeAllBtn');
+  if(btn){btn.disabled=true;btn.textContent='⇄ Merging…';}
+  let merged=0, failed=0; const errors=[];
+  for(let gi=0; gi<window._dupeGroups.length; gi++){
+    const group=window._dupeGroups[gi];
+    const songIds=group.songs.map(s=>s.id);
+    try{
+      const resp=await fetch('/api/merge-preview',{method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({song_ids:songIds})});
+      const data=await resp.json();
+      if(data.error){failed++; errors.push(data.error); continue;}
+      const execResp=await fetch('/api/merge-execute',{method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+          keeper_id:data.keeper.id,
+          loser_ids:data.losers.map(l=>l.id),
+          fields:data.merged_fields
+        })});
+      const res=await execResp.json();
+      if(res.ok) merged++; else {failed++; errors.push(res.error||'merge failed');}
+    }catch(e){failed++; errors.push(String(e));}
+  }
+  if(btn){btn.disabled=false;btn.textContent='⇄ Merge All';}
+  await loadSongs(currentCrate);await checkDuplicates();await loadCrates();
+  await openDupeModal();  // re-render so merged groups disappear
+  let msg=`Merged ${merged} group${merged!==1?'s':''}`;
+  if(failed) msg+=`, ${failed} failed`;
+  if(errors.length) msg+=`\n\n${errors.slice(0,3).join('\n')}`;
+  alert(msg);
+}
+
+// -- MERGE ---------------------------------------------------------------
+// Reviews a proposed merge before anything is written or deleted.
+// The keeper (highest bitrate) is shown alongside the file(s) that would
+// be removed, with editable fields for the merged metadata so you can
+// fix anything the auto-merge guessed wrong before confirming.
+let pendingMerge = null;
+
+async function openMergePreview(groupIndex) {
+  const group = window._dupeGroups[groupIndex];
+  await openMerge(group.songs.map(s => s.id));
+}
+
+// Core merge flow, shared by duplicate groups and the manual picker: shows
+// which file would be kept, which deleted, with editable merged metadata.
+async function openMerge(songIds) {
+  document.getElementById('mergeModal').classList.add('open');
+  const body = document.getElementById('mergeModalBody');
+  body.innerHTML = '<div style="color:var(--muted);font-size:13px">Analyzing files…</div>';
+
+  const resp = await fetch('/api/merge-preview', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ song_ids: songIds })
+  });
+  const data = await resp.json();
+
+  if (data.error) {
+    body.innerHTML = `<div style="color:var(--red);font-size:13px">${esc(data.error)}</div>`;
+    return;
+  }
+
+  pendingMerge = data;
+
+  const keeperKbps = data.keeper.bitrate ? Math.round(data.keeper.bitrate/1000) : '?';
+  const loserList = data.losers.map(l => {
+    const kbps = l.bitrate ? Math.round(l.bitrate/1000) : '?';
+    return `<div class="dfn" style="margin-bottom:4px">✕ ${esc(l.filename||l.filepath.split('/').pop())} <span style="color:var(--muted)">(${kbps}kbps, ${fmtSize(l.file_size_bytes)})</span></div>`;
+  }).join('');
+
+  const crateNote = data.crates_to_transfer.length
+    ? `<div style="font-family:var(--mono);font-size:10px;color:var(--purple);margin-top:8px">
+        Crate membership will transfer: ${data.crates_to_transfer.map(c=>esc(c.name)).join(', ')}
+       </div>`
+    : '';
+
+  const fields = [
+    {key:'title', label:'Title'}, {key:'artist', label:'Artist'},
+    {key:'album', label:'Album'}, {key:'year', label:'Year'},
+    {key:'genre', label:'Genre', list:'genreEditList'},
+    {key:'bpm', label:'BPM'}, {key:'musical_key', label:'Key'}
+  ];
+
+  body.innerHTML = `
+    <div style="margin-bottom:14px;padding:10px;background:rgba(0,230,118,.08);border:1px solid var(--green);border-radius:var(--r)">
+      <div style="font-family:var(--mono);font-size:10px;color:var(--green);letter-spacing:.08em;text-transform:uppercase;margin-bottom:4px">
+        Keeping (highest quality)
+      </div>
+      <div class="dfn">${esc(data.keeper.filename||data.keeper.filepath.split('/').pop())}
+        <span style="color:var(--muted)">(${keeperKbps}kbps, ${fmtSize(data.keeper.file_size_bytes)})</span>
+      </div>
+    </div>
+
+    <div style="margin-bottom:14px;padding:10px;background:var(--red-dim);border:1px solid var(--red);border-radius:var(--r)">
+      <div style="font-family:var(--mono);font-size:10px;color:var(--red);letter-spacing:.08em;text-transform:uppercase;margin-bottom:4px">
+        Will be deleted
+      </div>
+      ${loserList}
+    </div>
+
+    <div class="il" style="text-align:left;margin-bottom:8px;color:var(--muted)">
+      Merged metadata (edit if needed, then confirm):
+    </div>
+    <div class="ig">
+      ${fields.map(f => {
+        const raw=data.merged_fields[f.key]??'';
+        const val=f.key==='musical_key'?(toCamelot(raw)||raw||''):raw;
+        return `
+        <div class="il">${f.label}</div>
+        <input class="ii" id="merge-${f.key}" value="${esc(String(val))}"
+          ${f.list?`list="${f.list}"`:''}>`;
+      }).join('')}
+    </div>
+    ${crateNote}
+  `;
+}
+
+async function confirmMerge() {
+  if (!pendingMerge) return;
+  const fields = {};
+  ['title','artist','album','year','genre','bpm','musical_key'].forEach(k => {
+    const el = document.getElementById(`merge-${k}`);
+    if (el && el.value.trim() !== '') fields[k] = el.value.trim();
+  });
+  if (fields.bpm) fields.bpm = parseFloat(fields.bpm) || null;
+  if (fields.musical_key) fields.musical_key = fromCamelot(fields.musical_key) || fields.musical_key;
+
+  const resp = await fetch('/api/merge-execute', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      keeper_id: pendingMerge.keeper.id,
+      loser_ids: pendingMerge.losers.map(l => l.id),
+      fields
+    })
+  });
+  const data = await resp.json();
+
+  closeMergeModal();
+  if (data.ok) {
+    clearSelection();
+    await loadSongs(currentCrate);
+    await checkDuplicates();
+    await loadCrates();
+    // Refresh the duplicates list only if it was open -- merges started from
+    // the manual picker (or selection bar) shouldn't pop the dupe modal up.
+    if(document.getElementById('dupeModal').classList.contains('open')) openDupeModal();
+  } else {
+    alert('Merge failed: ' + (data.error || 'unknown error'));
+  }
+}
+
+function closeMergeModal() {
+  document.getElementById('mergeModal').classList.remove('open');
+  pendingMerge = null;
+}
+
+// -- MANUAL MERGE PICKER ------------------------------------------------------
+// The duplicate scan can't catch every case (Finder renames copies "Animals (1)",
+// tags can be missing, audio bytes can differ) -- so let the user pick any 2+
+// songs by hand and run them through the same preview/merge flow as a group.
+let mergePickIds = new Set();
+
+function openMergePicker(){
+  document.getElementById('mergePickerModal').classList.add('open');
+  mergePickIds.clear();
+  const s=document.getElementById('mergePickSearch');
+  if(s) s.value='';
+  renderMergePicker();
+}
+
+function closeMergePicker(){
+  document.getElementById('mergePickerModal').classList.remove('open');
+  mergePickIds.clear();
+}
+
+function renderMergePicker(){
+  const q=(document.getElementById('mergePickSearch').value||'').toLowerCase().trim();
+  const list=document.getElementById('mergePickList');
+  const songs=allSongs.filter(s=>!q
+    || `${s.title||''} ${s.artist||''} ${s.filename||''}`.toLowerCase().includes(q));
+  list.innerHTML=songs.map(s=>{
+    const sel=mergePickIds.has(s.id);
+    return `<div class="df" style="cursor:pointer;${sel?'background:var(--green-dim);border-color:var(--green)':''}"
+        onclick="toggleMergePick(${s.id})">
+      <div class="dfi">
+        <div class="dfn">${esc(s.title||cleanName(s.filename))}</div>
+        <div class="dfm">${esc(s.artist||'—')} · ${fmtDur(s.duration_seconds)} · ${fmtSize(s.file_size_bytes)}</div>
+      </div>
+      <div style="font-family:var(--mono);font-size:12px;flex-shrink:0;color:${sel?'var(--green)':'var(--muted2)'}">${sel?'✓':'＋'}</div>
+    </div>`;
+  }).join('') || '<div style="color:var(--muted);font-size:12px;padding:12px 4px">No songs match.</div>';
+  updateMergePickGo();
+}
+
+function toggleMergePick(id){
+  if(mergePickIds.has(id)) mergePickIds.delete(id);
+  else mergePickIds.add(id);
+  renderMergePicker();
+}
+
+function updateMergePickGo(){
+  const b=document.getElementById('mergePickGo');
+  if(!b) return;
+  const n=mergePickIds.size;
+  b.disabled=n<2;
+  b.textContent=n<2 ? `Merge selected (need ${2-n} more)` : `⇄ Merge ${n} songs`;
+}
+
+async function goMergePicker(){
+  const ids=[...mergePickIds];
+  if(ids.length<2) return;
+  closeMergePicker();
+  await openMerge(ids);
+}
+
+// ── BPM ANALYSIS ──────────────────────────────────────────────────────────────
+async function analyzeBpm(){
+  const btn=document.getElementById('bpmBtn');
+  btn.textContent='♩ Analyzing…';btn.disabled=true;
+  await fetch('/api/analyze-bpm',{method:'POST'});
+  const poll=setInterval(async()=>{
+    await loadSongs(currentCrate);
+    const rem=allSongs.filter(s=>!s.bpm).length;
+    if(rem===0){clearInterval(poll);btn.textContent='♩ Analyze BPM & Key';btn.disabled=false;}
+    else btn.textContent=`♩ ${rem} left…`;
+  },8000);
+}
+
+async function rescan(){
+  const resp=await fetch('/api/scan',{method:'POST'});
+  const data=await resp.json();
+  await loadSongs(currentCrate);await checkDuplicates();
+  let msg=`Scan complete — ${data.scanned} new files added.`;
+  if(data.purged) msg+=`\n${data.purged} missing file(s) removed from the library.`;
+  alert(msg);
+}
+
+// ── HELPERS ───────────────────────────────────────────────────────────────────
+function fmtDur(s){if(!s)return'—';return`${Math.floor(s/60)}:${Math.floor(s%60).toString().padStart(2,'0')}`}
+function fmtSize(b){if(!b)return'—';return b>1048576?(b/1048576).toFixed(1)+' MB':(b/1024).toFixed(0)+' KB'}
+
+// ── CAMELOT WHEEL ("Lancelot mode") ──────────────────────────────────────────
+// Converts raw stored keys ("F# min", "D# maj") into Camelot wheel numbers
+// (1A..12A minor, 1B..12B major). Each number's A/B pair are relative keys:
+// 8B = C major, 8A = A minor. Display and filtering use Camelot; the database
+// keeps the raw notation, so nothing backend-side changes.
+const CAMELOT_MAP = {
+  min:{C:'5A','C#':'12A',D:'7A','D#':'2A',E:'9A',F:'4A','F#':'11A',G:'6A','G#':'1A',A:'8A','A#':'3A',B:'10A'},
+  maj:{C:'8B','C#':'3B',D:'10B','D#':'5B',E:'12B',F:'7B','F#':'2B',G:'9B','G#':'4B',A:'11B','A#':'6B',B:'1B'}
+};
+const CAMELOT_REV = {};  // "5A" -> "C min", "8B" -> "C maj"
+for(const _mode in CAMELOT_MAP) for(const _root in CAMELOT_MAP[_mode])
+  CAMELOT_REV[CAMELOT_MAP[_mode][_root]] = _root + (_mode==='min'?' min':' maj');
+const FLAT_TO_SHARP = {bb:'A#', db:'C#', eb:'D#', gb:'F#', ab:'G#'};
+function toCamelot(raw){
+  if(!raw) return null;
+  const m=String(raw).trim().match(/^([a-gA-G])([#b]?)[ \t]*(maj|min|major|minor|m)?/);
+  if(!m) return null;
+  let root=(m[1].toUpperCase()+(m[2]||'')).toLowerCase();
+  if(FLAT_TO_SHARP[root]) root=FLAT_TO_SHARP[root];
+  root=root[0].toUpperCase()+root.slice(1);
+  const mode=(m[3]||'').toLowerCase();
+  const isMin=mode==='min'||mode==='minor'||mode==='m';
+  const isMaj=mode==='maj'||mode==='major';
+  if(!isMin&&!isMaj) return null;              // bare root is ambiguous
+  return CAMELOT_MAP[isMin?'min':'maj'][root]||null;
+}
+function fromCamelot(c){
+  if(!c) return null;
+  const m=String(c).trim().toUpperCase().replace(/[ \t]+/g,'').match(/^([0-9]{1,2})([AB])$/);
+  if(!m) return null;
+  return CAMELOT_REV[(+m[1])+m[2]]||null;       // +m[1] normalizes leading zeros
+}
+// Numeric wheel position for sorting: 1A->0, 1B->1, 2A->2, … 12B->23.
+function camelotNum(k){
+  const m=toCamelot(k);
+  if(!m) return null;
+  const p=m.match(/^([0-9]+)([AB])$/);
+  return p ? ((+p[1]-1)*2 + (p[2]==='A'?0:1)) : null;
+}
+function cleanName(n){return n.replace(/\.(mp3|wav|flac|m4a)$/i,'').replace(/\(SPOTISAVER\)/g,'').trim()}
+function esc(s){if(!s)return'';return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')}
+
+['infoModal','dupeModal','crateModal','addToCrateModal','addTransitionModal','mergeModal','mergePickerModal','folderPickerModal'].forEach(id=>{
+  document.getElementById(id).addEventListener('click',e=>{
+    if(e.target===e.currentTarget){
+      if(id==='infoModal') closeInfoModal();
+      else if(id==='dupeModal') closeDupeModal();
+      else if(id==='addToCrateModal') closeAddToCrateModal();
+      else if(id==='addTransitionModal') closeAddTransitionModal();
+      else if(id==='mergeModal') closeMergeModal();
+      else if(id==='mergePickerModal') closeMergePicker();
+      else if(id==='folderPickerModal') closeFolderPicker();
+      else closeCrateModal();
+    }
+  });
+});
+
+// ── SPOTIFY OAUTH ────────────────────────────────────────────────────────────
+async function checkSpotifyAuth() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('auth') === 'success') {
+    history.replaceState({}, '', '/');
+    showAuthStatus(true);
+  } else if (params.get('auth') === 'error') {
+    history.replaceState({}, '', '/');
+    showAuthStatus(false);
+    alert('Spotify connection failed. Please try again.');
+  } else {
+    const resp = await fetch('/api/auth/status');
+    const data = await resp.json();
+    showAuthStatus(data.connected);
+  }
+}
+
+function showAuthStatus(connected) {
+  const dot  = document.getElementById('spotifyDot');
+  const text = document.getElementById('spotifyText');
+  const btn  = document.getElementById('spotifyBtn');
+  if (connected) {
+    dot.classList.remove('off');
+    text.classList.remove('off');
+    text.textContent = 'Spotify connected';
+    btn.textContent  = 'Disconnect';
+    btn.onclick = spotifyLogout;
+  } else {
+    dot.classList.add('off');
+    text.classList.add('off');
+    text.textContent = 'Not connected — playlists need this';
+    btn.textContent  = 'Connect';
+    btn.onclick = spotifyAuth;
+  }
+}
+
+function spotifyAuth() {
+  window.location.href = '/auth/login';
+}
+
+async function spotifyLogout() {
+  await fetch('/api/auth/logout', { method: 'POST' });
+  showAuthStatus(false);
+}
+
+init();
+checkSpotifyAuth();
+</script>
+</body>
+</html>

@@ -1,0 +1,30 @@
+# ── Secrets — NEVER commit these ──────────────────────────────────────────────
+# Spotify app credentials (spotify_client_id / spotify_client_secret) and the
+# user OAuth tokens live here. The app reads them at runtime from
+# ~/.dj-library/config.json — see config.example.json for the template.
+config.json
+spotify_oauth.json
+
+# ── Runtime ───────────────────────────────────────────────────────────────────
+dj-library.log
+__pycache__/
+*.pyc
+
+# ── Downloaded binaries ───────────────────────────────────────────────────────
+# The app bootstraps and self-updates its own yt-dlp here on first use.
+bin/
+
+# ── macOS ────────────────────────────────────────────────────────────────────
+.DS_Store
+
+# ── Tooling / editor ─────────────────────────────────────────────────────────
+.agents/
+.freebuff/
+.idea/
+.vscode/
+
+# ── Databases & backups ──────────────────────────────────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+*.db.backup-*
