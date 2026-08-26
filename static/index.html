@@ -872,6 +872,15 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
       </div>
 
       <div style="margin-top:18px">
+        <div class="sb-label">Rekordbox / Serato / DJUCED</div>
+        <button class="btn-ghost" onclick="exportRekordboxXml()">⬇ Export library (rekordbox.xml)</button>
+        <div class="tool-hint">Exports your whole library — BPM, Camelot key, crates and
+          transition notes — as the standard rekordbox.xml that Rekordbox, Serato DJ Pro and
+          DJUCED (6.3+) all import (File → Import). Per-crate exports are on each crate in the
+          Crates tab.</div>
+      </div>
+
+      <div style="margin-top:18px">
         <div class="sb-label">Library</div>
         <button class="btn-ghost" onclick="rescan()">↻ Re-scan folder</button>
         <button class="btn-ghost" id="bpmBtn" onclick="analyzeBpm()">♩ Analyze BPM & Key</button>
@@ -1444,6 +1453,8 @@ async function loadCrates() {
       <span class="crate-badge">${c.is_smart?'smart':'manual'}</span>
       <button class="nav-item-sync" id="sync-btn-${c.id}"
         onclick="event.stopPropagation();syncCrateToMixxx(${c.id})" title="Sync to Mixxx">⇄</button>
+      <button class="nav-item-sync" onclick="event.stopPropagation();exportCrateXml(${c.id})"
+        title="Export this crate for Rekordbox/Serato/DJUCED">⭳</button>
       <button class="nav-item-del" onclick="event.stopPropagation();deleteCrate(${c.id})" title="Delete">✕</button>
     </div>`).join('');
   populateImportCrateSelect();
@@ -2484,6 +2495,24 @@ async function exportTransitionsCsv(){
     setTimeout(()=>URL.revokeObjectURL(url),1000);
   }catch(e){ alert('Export failed: '+e.message); }
 }
+
+// -- DJ SOFTWARE EXPORT (Rekordbox XML) ---------------------------------------
+// Downloads the standard rekordbox.xml that Rekordbox and Serato DJ Pro import
+// natively (File -> Import). BPM, Camelot key, crates and transition notes
+// all travel in the file.
+function downloadBlob(url, filename){
+  fetch(url).then(r=>{
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    return r.blob();
+  }).then(blob=>{
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob); a.download=filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+  }).catch(e=>alert('Export failed: '+e.message));
+}
+function exportRekordboxXml(){ downloadBlob('/api/export/rekordbox-xml','rekordbox.xml'); }
+function exportCrateXml(id){ downloadBlob('/api/export/rekordbox-xml?crate_id='+id,'crate.xml'); }
 
 // -- TRANSITIONS SIDEBAR TAB -------------------------------------------------
 // All links grouped by source song, newest first, with jump-to-song and delete.

@@ -2266,6 +2266,156 @@ def transitions_setlist():
 </body></html>'''
     return Response(page, mimetype='text/html')
 
+# -- DJ SOFTWARE EXPORT (Rekordbox XML) ----------------------------------------
+# The industry-standard interchange format: Rekordbox, Serato DJ Pro, DJUCED
+# (6.3+), Engine DJ and djay all import it natively (File -> Import). BPM, key
+# (Camelot) and crates/playlists travel in one file; transition notes ride
+# along in each track's Comments field.
+
+CAMELOT_MAP = {
+    'min': {'C':'5A','C#':'12A','D':'7A','D#':'2A','E':'9A','F':'4A','F#':'11A','G':'6A','G#':'1A','A':'8A','A#':'3A','B':'10A'},
+    'maj': {'C':'8B','C#':'3B','D':'10B','D#':'5B','E':'12B','F':'7B','F#':'2B','G':'9B','G#':'4B','A':'11B','A#':'6B','B':'1B'},
+}
+_FLAT_TO_SHARP = {'bb':'A#','db':'C#','eb':'D#','gb':'F#','ab':'G#'}
+
+def to_camelot(raw):
+    """'G min' -> '6A', 'C# maj' -> '3B', 'f#minor' -> '11A'. Already-camelot
+    values pass through; unparseable values return None."""
+    if not raw:
+        return None
+    s = str(raw).strip()
+    if re.match(r'^\d{1,2}[AB]$', s.upper()):
+        return s.upper()
+    m = re.match(r'^([a-gA-G])([#b]?)[ \t]*(maj|min|major|minor|m)?', s)
+    if not m:
+        return None
+    root = (m.group(1).upper() + (m.group(2) or '')).lower()
+    if root in _FLAT_TO_SHARP:
+        root = _FLAT_TO_SHARP[root]
+    root = root[0].upper() + root[1:]
+    mode = (m.group(3) or '').lower()
+    is_min = mode in ('min', 'minor', 'm')
+    is_maj = mode in ('maj', 'major')
+    if not is_min and not is_maj:
+        return None
+    return CAMELOT_MAP['min' if is_min else 'maj'].get(root)
+
+
+def crate_song_ids(crate_id):
+    """Resolves a crate's member song IDs (smart crates evaluate their rules)."""
+    with get_db() as db:
+        crate = db.execute('SELECT * FROM crates WHERE id=?', (crate_id,)).fetchone()
+        if not crate:
+            return []
+        crate = dict(crate)
+    if crate['is_smart']:
+        rules = json.loads(crate['rules'] or '[]')
+        return [s['id'] for s in evaluate_smart_crate(rules)]
+    with get_db() as db:
+        rows = db.execute('''SELECT s.id FROM songs s
+            JOIN crate_songs cs ON s.id=cs.song_id
+            WHERE cs.crate_id=?''', (crate_id,)).fetchall()
+    return [r['id'] for r in rows]
+
+
+def build_rekordbox_xml(songs, playlists):
+    """Renders the standard rekordbox XML. `songs` are full song dicts (from the
+    songs table); `playlists` is a list of (name, [song_id, ...])."""
+    from urllib.parse import quote
+    from xml.sax.saxutils import escape as _xesc
+
+    track_ids = {s['id']: i + 1 for i, s in enumerate(songs)}
+    kinds = {'.mp3': 'MP3 File', '.wav': 'WAV File', '.aif': 'AIFF File',
+             '.aiff': 'AIFF File', '.flac': 'FLAC File', '.m4a': 'M4A File',
+             '.aac': 'AAC File'}
+
+    def attr(name, value):
+        if value is None or value == '':
+            return ''
+        return f' {name}="{_xesc(str(value), {chr(34): "&quot;"})}"'
+
+    tracks = []
+    for s in songs:
+        dur = s.get('duration_seconds')
+        bitrate = ''
+        if dur and s.get('file_size_bytes'):
+            bitrate = str(int(s['file_size_bytes'] * 8 / dur / 1000))
+        ext = Path(s['filepath']).suffix.lower()
+        comments = ''
+        ts = outgoing_transitions_for(s['id'])
+        if ts:
+            comments = build_transition_comment(ts)
+        tracks.append(
+            '<TRACK' + attr('TrackID', track_ids[s['id']])
+            + attr('Name', s.get('title') or Path(s['filepath']).stem)
+            + attr('Artist', s.get('artist'))
+            + attr('Album', s.get('album'))
+            + attr('Genre', s.get('genre'))
+            + attr('Year', s.get('year'))
+            + attr('AverageBpm', f"{s['bpm']:.2f}" if s.get('bpm') else None)
+            + attr('Key', to_camelot(s.get('musical_key')))
+            + attr('TotalTime', int(round(dur * 1000)) if dur else None)
+            + attr('BitRate', bitrate or None)
+            + attr('DateAdded', (s.get('added_at') or '')[:10])
+            + attr('Comments', comments or None)
+            + attr('Kind', kinds.get(ext, 'MP3 File'))
+            + attr('Location', 'file://localhost' + quote(s['filepath'], safe='/'))
+            + '/>')
+
+    nodes = []
+    for name, ids in playlists:
+        if not ids:
+            continue
+        rows = ''.join(f'<TRACK Key="{track_ids[i]}"/>' for i in ids if i in track_ids)
+        nodes.append(f'<NODE Name="{_xesc(name)}" Type="1" Count="{len(ids)}">{rows}</NODE>')
+    playlists_xml = (f'<NODE Name="ROOT" Type="0" Count="{len(nodes)}">'
+                     + ''.join(nodes) + '</NODE>') if nodes else '<NODE Name="ROOT" Type="0" Count="0"/>'
+
+    return ('<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<DJ_PLAYLISTS Version="1.0.0">\n'
+            '  <PRODUCT Name="rekordbox" Version="6.0.0" Company="Pioneer DJ"/>\n'
+            f'  <COLLECTION Entries="{len(songs)}">\n'
+            + '\n'.join('    ' + t for t in tracks) + '\n'
+            '  </COLLECTION>\n'
+            '  <PLAYLISTS>\n'
+            f'    {playlists_xml}\n'
+            '  </PLAYLISTS>\n'
+            '</DJ_PLAYLISTS>\n')
+
+
+@app.route('/api/export/rekordbox-xml')
+def export_rekordbox_xml():
+    """Whole library, or a single crate (?crate_id=N), as the standard
+    rekordbox XML that Rekordbox and Serato DJ Pro both import (File -> Import)."""
+    crate_id = request.args.get('crate_id', type=int)
+    if crate_id is not None:
+        ids = crate_song_ids(crate_id)
+        if not ids:
+            return jsonify({'error': 'Crate not found or empty'}), 404
+        with get_db() as db:
+            crate = db.execute('SELECT name FROM crates WHERE id=?', (crate_id,)).fetchone()
+            name = crate['name'] if crate else 'crate'
+        placeholders = ','.join('?' * len(ids))
+        with get_db() as db:
+            rows = db.execute(f'SELECT * FROM songs WHERE id IN ({placeholders})', ids).fetchall()
+        songs = [dict(r) for r in rows]
+        order = {i: pos for pos, i in enumerate(ids)}
+        songs.sort(key=lambda s: order.get(s['id'], 999))
+        xml = build_rekordbox_xml(songs, [(name, ids)])
+        fname = re.sub(r'[^A-Za-z0-9._-]+', '-', name).strip('-') or 'crate'
+    else:
+        with get_db() as db:
+            rows = db.execute('SELECT * FROM songs ORDER BY artist, title').fetchall()
+            crates = db.execute('SELECT id, name FROM crates ORDER BY name').fetchall()
+        songs = [dict(r) for r in rows]
+        playlists = [(c['name'], crate_song_ids(c['id'])) for c in crates]
+        xml = build_rekordbox_xml(songs, playlists)
+        fname = 'rekordbox'
+    resp = Response(xml, mimetype='application/xml')
+    resp.headers['Content-Disposition'] = f'attachment; filename={fname}.xml'
+    return resp
+
+
 @app.route('/')
 def index():
     return send_from_directory('static','index.html')

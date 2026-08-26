@@ -76,6 +76,23 @@ startup, watches it for changes, and can auto-start via LaunchAgent:
   closed while syncing (the app refuses otherwise, and always backs up the DB
   before writing).
 
+## Serato, Rekordbox & DJUCED
+
+Export your library (or a single crate — button on each crate) as the standard
+**rekordbox.xml** — Tools → "Export library (rekordbox.xml)". The file carries
+BPM, the Camelot key, crates/playlists, and your transition notes (in each
+track's Comments field).
+
+- **Rekordbox**: File → Import → *rekordbox.xml*, or live-link it under
+  File → Preferences → Bridge → "Imported Library" so it auto-refreshes.
+- **Serato DJ Pro**: File → Import → Rekordbox XML (playlists become crates).
+- **DJUCED** (6.3+): Library → Import Rekordbox xml, then pick which playlists to bring in.
+- Engine DJ and djay import the same format.
+
+Writing directly into Rekordbox's own database is deliberately not supported —
+its schema is undocumented and changes between versions, and Serato has no
+writable database at all. The XML route is the safe, version-proof standard.
+
 ## Security
 
 - `config.json` and `spotify_oauth.json` contain credentials (Spotify client
