@@ -28,3 +28,9 @@ bin/
 *.sqlite
 *.sqlite3
 *.db.backup-*
+
+# ── Generated exports ────────────────────────────────────────────────────────
+# Auto-regenerated rekordbox.xml (kept current on disk for DJUCED / Rekordbox /
+# Serato imports). It is a build artifact -- regenerate, never commit.
+rekordbox.xml
+rekordbox.xml.tmp

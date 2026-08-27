@@ -310,6 +310,21 @@ aside{grid-area:sidebar;
 .sb-panel::-webkit-scrollbar{width:6px}
 .sb-panel::-webkit-scrollbar-thumb{background:var(--scroll);border-radius:3px}
 
+/* software-adaptive UI: when the user picks a non-Mixxx DJ app, Mixxx-only
+   buttons (sync-to-Mixxx, crate ⇄) disappear. Default (not chosen) keeps them. */
+body[data-sw="rekordbox"] .mixxx-only,
+body[data-sw="serato"] .mixxx-only,
+body[data-sw="djuced"] .mixxx-only,
+body[data-sw="engine"] .mixxx-only,
+body[data-sw="none"] .mixxx-only{display:none!important}
+
+/* software picker pills (Settings tab + intro guide) */
+.sw-pills{display:flex;flex-wrap:wrap;gap:6px}
+.sw-pill{font-family:var(--mono);font-size:11px;color:var(--text2);background:var(--chip);
+  border:1px solid var(--border);border-radius:100px;padding:7px 12px;cursor:pointer;transition:all .15s}
+.sw-pill:hover{border-color:var(--cyan);color:var(--cyan)}
+.sw-pill.active{background:var(--cyan-dim);color:var(--cyan);border-color:var(--cyan)}
+
 /* folder/crate list */
 .nav-list{display:flex;flex-direction:column;gap:2px;padding:12px}
 .nav-item{background:transparent;border:none;color:var(--muted);font-family:var(--mono);
@@ -762,6 +777,7 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
     <button class="sb-tab" onclick="showTab('crates')">Crates</button>
     <button class="sb-tab" onclick="showTab('transitions')">Transitions</button>
     <button class="sb-tab" onclick="showTab('tools')">Tools</button>
+    <button class="sb-tab" onclick="showTab('settings')">⚙ Settings</button>
   </div>
 
   <!-- LIBRARY TAB -->
@@ -785,7 +801,7 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
   <div class="sb-panel" id="tab-transitions">
     <div style="padding:10px 14px">
       <button class="btn-ghost" onclick="openAddTransitionModal(null)">⇄ + Add Transition</button>
-      <button class="btn-ghost" onclick="syncTransitionsToMixxx()" style="margin-left:6px"
+      <button class="btn-ghost mixxx-only" onclick="syncTransitionsToMixxx()" style="margin-left:6px"
         title="Write each song's outgoing transition notes into its Mixxx comment (Mixxx must be closed)">⇄ Sync to Mixxx comments</button>
       <button class="btn-ghost" onclick="exportTransitionsCsv()" style="margin-left:6px"
         title="Download every transition as a CSV spreadsheet (keys + BPMs included)">⬇ CSV</button>
@@ -874,16 +890,71 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
       <div style="margin-top:18px">
         <div class="sb-label">Rekordbox / Serato / DJUCED</div>
         <button class="btn-ghost" onclick="exportRekordboxXml()">⬇ Export library (rekordbox.xml)</button>
-        <div class="tool-hint">Exports your whole library — BPM, Camelot key, crates and
-          transition notes — as the standard rekordbox.xml that Rekordbox, Serato DJ Pro and
-          DJUCED (6.3+) all import (File → Import). Per-crate exports are on each crate in the
+        <div class="tool-hint" id="rekordboxWhyHint">Exports your whole library — BPM, Camelot key,
+          crates and transition notes — as the standard rekordbox.xml that Rekordbox, Serato DJ Pro
+          and DJUCED (6.3+) all import (File → Import). Per-crate exports are on each crate in the
           Crates tab.</div>
+        <div class="tool-hint" id="rekordboxLiveHint" style="color:#8b949e"></div>
       </div>
 
       <div style="margin-top:18px">
         <div class="sb-label">Library</div>
         <button class="btn-ghost" onclick="rescan()">↻ Re-scan folder</button>
         <button class="btn-ghost" id="bpmBtn" onclick="analyzeBpm()">♩ Analyze BPM & Key</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- SETTINGS TAB -->
+  <div class="sb-panel" id="tab-settings">
+    <div style="padding:12px 14px 18px">
+      <div class="sb-label">Your DJ software</div>
+      <div class="sw-pills" id="swPills"></div>
+      <div class="tool-hint" style="margin-top:8px">The app adapts its sync buttons, workflow hints
+        and the intro guide to this choice. Pick one, or “Just organizing” if you only manage files here.</div>
+
+      <div class="tool-card" style="margin-top:14px">
+        <div class="tool-opt">
+          <div class="tool-opt-text">
+            <div class="tool-opt-name" id="swGuideTitle">How songs get into your software</div>
+            <div class="tool-opt-desc" id="swGuideBody" style="white-space:pre-line;line-height:1.55"></div>
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-top:18px">
+        <div class="sb-label">Rekordbox export file</div>
+        <div style="display:flex;gap:8px">
+          <input type="text" class="fi" id="exportPathInput" spellcheck="false"
+            placeholder="~/.dj-library/rekordbox.xml"
+            onkeydown="if(event.key==='Enter')saveExportPath()">
+          <button class="btn-ghost" onclick="openFolderPicker('export')" style="flex-shrink:0"
+            title="Pick a folder — the file rekordbox.xml is written inside it">🔍 Browse…</button>
+          <button class="btn-save" onclick="saveExportPath()" style="flex-shrink:0">Save</button>
+        </div>
+        <div class="tool-hint">This always-current rekordbox.xml is what Rekordbox, Serato, DJUCED and
+          Engine DJ import (see the guide above). Point it at a synced folder (Dropbox / iCloud /
+          network share) if your DJ software runs on another computer — Rekordbox's Bridge can
+          live-link it so it refreshes automatically.</div>
+      </div>
+
+      <div class="tool-card" style="margin-top:14px">
+        <div class="tool-opt">
+          <div class="tool-opt-text">
+            <div class="tool-opt-name mixxx-only">Auto-add new songs to Mixxx</div>
+            <div class="tool-opt-desc mixxx-only">New songs are pushed into Mixxx's library
+              automatically, matched by file path — nothing is ever duplicated</div>
+          </div>
+          <label class="switch mixxx-only" title="Auto-sync new songs into Mixxx">
+            <input type="checkbox" id="autoSyncMixxxCheckbox" onchange="saveAutoSyncMixxx()">
+            <span class="switch-track"></span>
+          </label>
+        </div>
+      </div>
+
+      <div style="margin-top:18px">
+        <div class="sb-label">Getting started</div>
+        <button class="btn-ghost" onclick="openIntroGuide()">📖 Open the intro guide</button>
       </div>
     </div>
   </div>
@@ -1013,6 +1084,27 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
       <button class="mclose" onclick="closeAddTransitionModal()">✕</button>
     </div>
     <div class="mbody" id="addTransitionBody"></div>
+  </div>
+</div>
+
+<!-- INTRO / ONBOARDING GUIDE -->
+<div class="modal-bd" id="introModal">
+  <div class="modal modal-w">
+    <div class="mhdr">
+      <div class="mtitle" style="color:var(--cyan)">👋 Welcome to DJ Library</div>
+      <button class="mclose" onclick="closeIntroGuide()">✕</button>
+    </div>
+    <div class="mbody" style="max-height:58vh;overflow-y:auto">
+      <div style="margin-bottom:12px;color:var(--muted);font-size:12px">First, which DJ software do you
+        use? This adapts the workflow, the sync buttons and this guide. You can change it anytime in
+        ⚙ Settings.</div>
+      <div class="sw-pills" id="introSwPills" style="margin-bottom:14px"></div>
+      <div id="introSteps" style="white-space:pre-line;line-height:1.65"></div>
+    </div>
+    <div class="iacts">
+      <button class="btn-ghost" onclick="closeIntroGuide()">Later</button>
+      <button class="btn-save" onclick="finishIntro()">Get started</button>
+    </div>
   </div>
 </div>
 
@@ -1356,13 +1448,30 @@ async function init() {
     const cfgResp = await fetch('/api/config');
     const cfg = await cfgResp.json();
     if (cfg && cfg.music_dir) MUSIC_DIR = cfg.music_dir;
+    if (cfg && cfg.rekordbox_export_path) {
+      const hint = document.getElementById('rekordboxLiveHint');
+      if (hint) hint.textContent = '🔄 Live file (auto-updated on every change): ' + cfg.rekordbox_export_path;
+      document.getElementById('exportPathInput').value = cfg.rekordbox_export_path;
+    }
+    window.djsSoftware = (cfg && cfg.djs_software) || '';
+    window.autoSyncMixxx = !cfg || cfg.auto_sync_mixxx !== false;
+    const toggle = document.getElementById('autoSyncMixxxCheckbox');
+    if (toggle) toggle.checked = window.autoSyncMixxx;
+    applySoftwareUI();
   } catch(e) { console.error('Failed to load config:', e); }
+  renderSoftwarePills('swPills');
   buildKeyPills();
   buildTableHeader();
   await loadSongs();
   await loadCrates();
   await checkDuplicates();
   await loadGenreSuggestions();
+  // First-run onboarding: show the intro until a software is picked (or the
+  // user dismisses it once in this browser).
+  try {
+    if (!window.djsSoftware && !localStorage.getItem('introDismissed'))
+      setTimeout(openIntroGuide, 500);
+  } catch(_) {}
 }
 
 // ── DATA ──────────────────────────────────────────────────────────────────────
@@ -1388,13 +1497,127 @@ async function loadGenreSuggestions() {
 // ── TABS ──────────────────────────────────────────────────────────────────────
 function showTab(name) {
   document.querySelectorAll('.sb-tab').forEach((t,i)=>{
-    const tabs=['library','crates','transitions','tools'];
+    const tabs=['library','crates','transitions','tools','settings'];
     t.classList.toggle('active', tabs[i]===name);
   });
   document.querySelectorAll('.sb-panel').forEach(p=>p.classList.remove('active'));
   document.getElementById(`tab-${name}`).classList.add('active');
   // Fresh data whenever the Transitions tab becomes visible
   if(name==='transitions') renderTransitionTab();
+}
+
+// ── DJ SOFTWARE & SETTINGS ───────────────────────────────────────────────────
+// Which DJ app the user performs with. Drives which sync buttons show, the
+// workflow guide and the first-run intro. Saved to config.json via /api/config.
+
+const SOFTWARE = {
+  mixxx:   {label:'Mixxx',
+    workflow:'Mixxx watches your music folder itself — the same folder this app scans — so your songs are already there when you open it. Transition notes sync into Mixxx comments automatically as you add or edit them, and new songs are pushed into Mixxx automatically (toggle in Settings).',
+    steps:'1. Add songs: download them here, drop files in your music folder, or use Import Folder.\n2. Open Mixxx — it scans the same folder and sees everything.\n3. Cues, loops and waveforms are still yours to set in Mixxx.\n4. Optional: Crates tab → ⇄ on a crate pushes it into Mixxx as a crate.'},
+  rekordbox:{label:'Rekordbox',
+    workflow:'Rekordbox can’t watch a folder, so the bridge is the always-current rekordbox.xml this app writes after every change. Import it once, then enable Rekordbox’s Bridge for automatic refreshes.',
+    steps:'1. Settings → pick an export path (a synced folder works — see the note below).\n2. Rekordbox → File → Import → choose the rekordbox.xml. Tracks, BPM, Camelot keys, crates and transition notes land immediately.\n3. For automatic updates: Rekordbox → File → Preferences → Bridge → Imported Library → point it at the same file. It refreshes whenever the file changes.\n4. Keep adding songs here — the file stays fresh and Bridge picks it up.'},
+  serato:  {label:'Serato DJ Pro',
+    workflow:'Serato has no folder-watching and no live link, so you import the rekordbox.xml whenever you want a refresh. It merges by file path — existing tracks are never touched or duplicated.',
+    steps:'1. Settings → pick an export path (a synced folder is handy).\n2. Serato DJ Pro → File → Import → Rekordbox XML → choose the rekordbox.xml.\n3. Your tracks arrive with BPM + Camelot key, and playlists become crates.\n4. Re-import after big additions — it only adds the new stuff.'},
+  djuced:  {label:'DJUCED',
+    workflow:'DJUCED (6.3+) imports rekordbox.xml natively. Its library lives inside the app, not in a folder, so this file is the door in.',
+    steps:'1. Settings → pick an export path.\n2. DJUCED → Library → Import → Rekordbox xml → choose the rekordbox.xml.\n3. Tick the playlists you want — they become DJUCED playlists with BPM, keys and notes.\n4. Re-import after big additions — it adds only the new tracks.'},
+  engine:  {label:'Engine DJ',
+    workflow:'Engine DJ also imports rekordbox.xml, so the same file covers it.',
+    steps:'1. Settings → pick an export path.\n2. Engine DJ → Library → Import → rekordbox.xml.\n3. Tracks, BPM, keys, playlists and notes land in your library.\n4. Re-import after big additions.'},
+  none:    {label:'Just organizing',
+    workflow:'No DJ-software syncing — DJ Library is your library manager. Downloads, tag editing, BPM/key analysis, crates and transition planning all work as-is.',
+    steps:'1. Add songs: download them here, drop files in your music folder, or use Import Folder.\n2. Use crates to organize and transitions to plan mixes.\n3. Pick a DJ app in Settings later if you want to move your library into one — the export is ready whenever you are.'}
+};
+
+function softwarePillHtml(sw){
+  const s=SOFTWARE[sw];
+  return `<button class="sw-pill ${window.djsSoftware===sw?'active':''}" data-sw="${sw}"
+    onclick="chooseSoftware('${sw}')">${esc(s.label)}</button>`;
+}
+
+function renderSoftwarePills(containerId){
+  const el=document.getElementById(containerId);
+  if(!el) return;
+  el.innerHTML=Object.keys(SOFTWARE).map(softwarePillHtml).join('');
+}
+
+async function chooseSoftware(sw){
+  if(!SOFTWARE[sw]) return;
+  window.djsSoftware=sw;
+  renderSoftwarePills('swPills');
+  renderSoftwarePills('introSwPills');
+  applySoftwareUI();
+  const steps=document.getElementById('introSteps');
+  if(steps) steps.textContent=SOFTWARE[sw].steps;
+  try{
+    const resp=await fetch('/api/config',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({djs_software:sw})});
+    const data=await resp.json();
+    if(data.error) console.error('Save software failed:',data.error);
+  }catch(e){ console.error('Save software failed:',e); }
+}
+
+function applySoftwareUI(){
+  document.body.dataset.sw=window.djsSoftware||'';
+  const s=SOFTWARE[window.djsSoftware]||SOFTWARE.none;
+  const title=document.getElementById('swGuideTitle');
+  const body=document.getElementById('swGuideBody');
+  if(title) title.textContent=window.djsSoftware
+    ? `How songs get into ${s.label}` : 'How songs get into your software';
+  if(body) body.textContent=s.workflow;
+  // The Tools-tab export card explains why the file matters for this software.
+  const why=document.getElementById('rekordboxWhyHint');
+  if(why){
+    if(window.djsSoftware==='mixxx'||window.djsSoftware===''){
+      why.textContent='Optional — only needed if you also want your library in Rekordbox, Serato, DJUCED or Engine DJ. The file is kept fresh on every change.';
+    }else{
+      why.textContent=`This is your main door into ${s.label}: import it once, then re-import when you add songs${window.djsSoftware==='rekordbox'?' — or enable Bridge (Rekordbox → File → Preferences → Bridge → Imported Library) for fully automatic updates':''}.`;
+    }
+  }
+}
+
+async function saveExportPath(){
+  const input=document.getElementById('exportPathInput');
+  const p=(input.value||'').trim();
+  if(!p){ alert('Enter a path first.'); return; }
+  try{
+    const resp=await fetch('/api/config',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({rekordbox_export_path:p})});
+    const data=await resp.json();
+    if(data.error){ alert('Save failed: '+data.error); return; }
+    input.value=data.rekordbox_export_path;
+    const hint=document.getElementById('rekordboxLiveHint');
+    if(hint) hint.textContent='🔄 Live file (auto-updated on every change): '+data.rekordbox_export_path;
+  }catch(e){ alert('Save failed: '+e.message); }
+}
+
+async function saveAutoSyncMixxx(){
+  const on=document.getElementById('autoSyncMixxxCheckbox').checked;
+  window.autoSyncMixxx=on;
+  try{
+    await fetch('/api/config',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({auto_sync_mixxx:on})});
+  }catch(e){ console.error('Save auto-sync failed:',e); }
+}
+
+// ── INTRO GUIDE (first-run onboarding) ────────────────────────────────────────
+function openIntroGuide(){
+  renderSoftwarePills('introSwPills');
+  const steps=document.getElementById('introSteps');
+  if(steps) steps.textContent=(SOFTWARE[window.djsSoftware]||SOFTWARE.none).steps;
+  document.getElementById('introModal').classList.add('open');
+}
+
+function closeIntroGuide(){
+  document.getElementById('introModal').classList.remove('open');
+  try{ localStorage.setItem('introDismissed','1'); }catch(_){}
+}
+
+function finishIntro(){
+  if(!window.djsSoftware){ alert('Pick a software above first — “Just organizing” works too.'); return; }
+  closeIntroGuide();
 }
 
 // ── FOLDERS ───────────────────────────────────────────────────────────────────
@@ -1451,7 +1674,7 @@ async function loadCrates() {
       onclick="selectCrate(${c.id},this)">
       <span class="nav-item-label">${esc(c.name)}</span>
       <span class="crate-badge">${c.is_smart?'smart':'manual'}</span>
-      <button class="nav-item-sync" id="sync-btn-${c.id}"
+      <button class="nav-item-sync mixxx-only" id="sync-btn-${c.id}"
         onclick="event.stopPropagation();syncCrateToMixxx(${c.id})" title="Sync to Mixxx">⇄</button>
       <button class="nav-item-sync" onclick="event.stopPropagation();exportCrateXml(${c.id})"
         title="Export this crate for Rekordbox/Serato/DJUCED">⭳</button>
@@ -1540,9 +1763,11 @@ async function startFolderImport() {
 // Finder-style browse + search for the Import Folder tool. All filesystem
 // access happens on the backend; this only renders what /api/folders returns.
 let folderPick = { path: null };
+let folderPickTarget = 'import';   // where the picked folder goes: 'import' | 'export'
 let folderSearchTimer = null;
 
-function openFolderPicker(){
+function openFolderPicker(target){
+  folderPickTarget = target || 'import';
   const m = document.getElementById('folderPickerModal');
   m.classList.add('open');
   document.getElementById('folderSearchInput').value = '';
@@ -1638,6 +1863,12 @@ function clearFolderSearch(){
 
 function usePickedFolder(){
   if(!folderPick.path) return;
+  if(folderPickTarget==='export'){
+    document.getElementById('exportPathInput').value = folderPick.path;
+    closeFolderPicker();
+    document.getElementById('exportPathInput').focus();
+    return;
+  }
   document.getElementById('importFolderPath').value = folderPick.path;
   closeFolderPicker();
   document.getElementById('importFolderPath').focus();

@@ -9,6 +9,7 @@ import re
 import io
 import csv
 import html
+import queue
 import urllib.request
 from pathlib import Path
 from flask import Flask, jsonify, request, send_from_directory, Response
@@ -34,6 +35,46 @@ SPOTIFY_CLIENT_SECRET = _config.get("spotify_client_secret", "")
 YT_DLP  = os.path.expanduser("~/.dj-library/bin/yt-dlp")
 YT_DLP_URL = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp"
 FFMPEG  = _config.get("ffmpeg_path") or "/opt/homebrew/bin/ffmpeg"
+# The rekordbox.xml that DJUCED / Rekordbox / Serato import from is kept
+# always-current on disk by an auto-export that fires after every library
+# change. Point this at a synced folder (Dropbox / iCloud / network share) if
+# the DJ software runs on a different computer.
+REKORDBOX_EXPORT_PATH = os.path.expanduser(
+    _config.get("rekordbox_export_path", "~/.dj-library/rekordbox.xml"))
+# Which DJ software the user performs with ("mixxx", "rekordbox", "serato",
+# "djuced", "engine", or "" = not chosen). Drives UI adaptation + workflow
+# hints, and is changeable in the Settings tab (stored in config.json).
+DJS_SOFTWARE = _config.get("djs_software", "")
+# Whether newly-added songs are auto-pushed into Mixxx's library (Settings
+# tab toggle; default on).
+AUTO_SYNC_MIXXX = bool(_config.get("auto_sync_mixxx", True))
+
+
+def _config_dict():
+    """The settings the frontend needs, as a dict (shared by GET + POST)."""
+    return {'music_dir': MUSIC_DIR,
+            'rekordbox_export_path': REKORDBOX_EXPORT_PATH,
+            'djs_software': DJS_SOFTWARE,
+            'auto_sync_mixxx': AUTO_SYNC_MIXXX}
+
+
+def _save_config(updates):
+    """Merges `updates` into config.json (preserving existing keys, including
+    the Spotify secrets) and refreshes the affected module-level settings.
+    Only settings that can change at runtime are updated here."""
+    global _config, REKORDBOX_EXPORT_PATH, DJS_SOFTWARE, AUTO_SYNC_MIXXX
+    path = os.path.expanduser("~/.dj-library/config.json")
+    data = dict(_config)
+    data.update(updates)
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump(data, f, indent=2)
+    _config = data
+    if 'rekordbox_export_path' in updates:
+        REKORDBOX_EXPORT_PATH = os.path.expanduser(updates['rekordbox_export_path'])
+    if 'djs_software' in updates:
+        DJS_SOFTWARE = updates['djs_software']
+    if 'auto_sync_mixxx' in updates:
+        AUTO_SYNC_MIXXX = bool(updates['auto_sync_mixxx'])
 
 # -- DATABASE --------------------------------------------------------------
 
@@ -370,7 +411,7 @@ def analyze_bpm_key_librosa(filepath):
         print(f"Librosa analysis failed: {e}")
         return None, None
 
-def analyze_and_store(filepath, song_id, spotify_id=None):
+def analyze_and_store(filepath, song_id, spotify_id=None, queue_export=True):
     bpm, key = None, None
     if spotify_id:
         bpm, key = get_track_audio_features(spotify_id)
@@ -384,6 +425,10 @@ def analyze_and_store(filepath, song_id, spotify_id=None):
             db.commit()
         if bpm:
             write_metadata(filepath, bpm=bpm)
+        # Keys/BPM ride in the rekordbox.xml -- refresh the on-disk export. The
+        # library-wide pass disables this per-song and queues once at the end.
+        if queue_export:
+            queue_auto_export()
 
 _bpm_analysis_lock = threading.Lock()
 
@@ -399,8 +444,12 @@ def analyze_library_bpm():
         print(f"Analyzing BPM for {len(songs)} songs...")
         for row in songs:
             if os.path.exists(row['filepath']):
-                analyze_and_store(row['filepath'], row['id'], row['spotify_id'])
+                analyze_and_store(row['filepath'], row['id'], row['spotify_id'],
+                                  queue_export=False)
         print("BPM analysis complete")
+        if songs:
+            # Analysis may have changed keys/BPM -- refresh the on-disk export.
+            queue_auto_export()
     finally:
         _bpm_analysis_lock.release()
 
@@ -497,10 +546,14 @@ def find_duplicates_for_file(filepath, title, artist, duration):
 
 def scan_library():
     added = 0
+    new_paths = []
     for root,_,files in os.walk(MUSIC_DIR):
         for fname in files:
             if Path(fname).suffix.lower() in ('.mp3','.wav','.flac','.m4a'):
-                if add_file_to_db(os.path.join(root,fname)): added+=1
+                fp = os.path.join(root,fname)
+                if add_file_to_db(fp):
+                    added += 1
+                    new_paths.append(fp)
     # Purge database rows whose files no longer exist on disk -- files deleted
     # in Finder (or moved out of the library) otherwise leave ghost entries
     # forever, and folders that should be empty keep showing up in the sidebar.
@@ -514,6 +567,13 @@ def scan_library():
             _delete_song_rows(db, [r['id'] for r in missing])
             db.commit()
         purged = len(missing)
+    # Songs discovered by this scan (added while the app was closed, or picked
+    # up by the manual rescan button) get pushed into Mixxx in the background.
+    if new_paths:
+        auto_sync_new_songs(new_paths)
+    # The library changed (adds or purges) -- refresh the on-disk rekordbox.xml.
+    if added or purged:
+        queue_auto_export()
     return added, purged
 
 def _delete_song_rows(db, song_ids):
@@ -649,7 +709,10 @@ def do_download(query, spotify_id=None, title=None, artist=None,
         if downloaded_path and os.path.exists(downloaded_path):
             write_metadata(downloaded_path, title=title, artist=artist,
                           album=album, year=year)
-            add_file_to_db(downloaded_path)
+            if add_file_to_db(downloaded_path):
+                # Newly downloaded song -- push it into Mixxx in the background.
+                auto_sync_new_songs([downloaded_path])
+                queue_auto_export()
             with get_db() as db:
                 if spotify_id:
                     db.execute('UPDATE songs SET spotify_id=? WHERE filepath=?',
@@ -692,7 +755,11 @@ class MusicFolderHandler(FileSystemEventHandler):
             dupe_name = dupes[0][0].get('filename', '?')
             subprocess.run(['osascript','-e',
                 f'display notification "Possible duplicate of: {dupe_name}" with title "DJ Library"'])
-        add_file_to_db(filepath)
+        if add_file_to_db(filepath):
+            # Genuinely new song (Finder drop, download, or import landing in the
+            # watched folder) -- push it into Mixxx's library in the background.
+            auto_sync_new_songs([filepath])
+            queue_auto_export()
     def _remove(self, filepath):
         """Removes a song row (and its crate memberships) when its file is
         deleted or moved out of the watched library folder in Finder."""
@@ -701,6 +768,7 @@ class MusicFolderHandler(FileSystemEventHandler):
             if row:
                 _delete_song_rows(db, [row['id']])
                 db.commit()
+                queue_auto_export()
 
 # -- SMART CRATE EVALUATION ---------------------------------------------------
 
@@ -983,6 +1051,115 @@ def sync_transitions_to_mixxx():
             except Exception: pass
         return {'ok': False, 'error': 'Sync failed, restored backup: ' + _mixxx_error_hint(e) + str(e)}
 
+# -- NEW SONGS → MIXXX LIBRARY -----------------------------------------------
+# When a song is added to DJ Library (Finder drop, download, folder import, or
+# startup scan), we push it into Mixxx's library too so it shows up there
+# without waiting for Mixxx's own rescan. Matching is by filepath: if the track
+# already exists in Mixxx we leave it alone (Mixxx may already know it, and we
+# never want to create duplicate rows). Same safety rules as every other Mixxx
+# write: refuse while Mixxx is open, back up the DB before writing, restore it
+# on any failure.
+
+def sync_new_songs_to_mixxx(filepaths):
+    """Inserts DJ Library songs that Mixxx doesn't know yet into Mixxx's
+    library, matched by filepath. Takes a list so the startup scan can batch
+    many files under a single backup + transaction. Returns a summary dict."""
+    if is_mixxx_running():
+        return {'ok': False, 'error': "Mixxx is currently running. Close Mixxx before syncing."}
+    db_path = find_mixxx_db()
+    if not db_path:
+        return {'ok': False, 'error': "Could not find Mixxx's database. Open Mixxx at least once first."}
+    if not _mixxx_db_accessible(db_path):
+        return {'ok': False, 'error': _mixxx_error_hint(OSError('unable to open database file'))}
+
+    with get_db() as db:
+        songs = []
+        for fp in filepaths:
+            row = db.execute('SELECT * FROM songs WHERE filepath=?', (fp,)).fetchone()
+            if row:
+                songs.append(row)
+    if not songs:
+        return {'ok': True, 'synced': 0, 'already_in_mixxx': 0}
+
+    backup_path = db_path + '.backup-' + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    conn = None
+    try:
+        shutil.copy2(db_path, backup_path)
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cols = [r[1] for r in cur.execute('PRAGMA table_info(library)')]
+
+        already, synced = 0, 0
+        for song in songs:
+            fp = song['filepath']
+            existing = cur.execute(
+                "SELECT library.id FROM library "
+                "JOIN track_locations ON library.location = track_locations.id "
+                "WHERE track_locations.location = ?", (fp,)).fetchone()
+            if existing:
+                already += 1
+                continue
+            fname = Path(fp).name
+            cur.execute(
+                "INSERT INTO track_locations "
+                "(location, filename, directory, filesize, fs_deleted, needs_verification) "
+                "VALUES (?,?,?,?,0,1)",
+                (fp, fname, str(Path(fp).parent),
+                 os.path.getsize(fp) if os.path.exists(fp) else 0))
+            loc_id = cur.lastrowid
+            fields = {
+                'artist': song['artist'], 'title': song['title'],
+                'album': song['album'], 'year': song['year'],
+                'genre': song['genre'], 'location': loc_id,
+                'duration': song['duration_seconds'],
+                'filetype': Path(fp).suffix.lower().lstrip('.'),
+                'datetime_added': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'mixxx_deleted': 0, 'header_parsed': 1,
+            }
+            fields = {k: v for k, v in fields.items() if k in cols}
+            cur.execute(
+                'INSERT INTO library (%s) VALUES (%s)' % (
+                    ','.join(fields), ','.join('?' * len(fields))),
+                list(fields.values()))
+            synced += 1
+
+        conn.commit()
+        conn.close(); conn = None
+        os.remove(backup_path)
+        return {'ok': True, 'synced': synced, 'already_in_mixxx': already}
+    except Exception as e:
+        if conn is not None:
+            try: conn.close()
+            except Exception: pass
+        if os.path.exists(backup_path):
+            try: shutil.copy2(backup_path, db_path)
+            except Exception: pass
+        return {'ok': False, 'error': 'Sync failed, restored backup: ' + _mixxx_error_hint(e) + str(e)}
+
+def auto_sync_new_songs(filepaths):
+    """Background auto-sync of newly-added songs into Mixxx, fired from the
+    folder watcher and the library scan. Failures are logged, never surfaced
+    -- Mixxx being open or unreachable just logs and skips. Disabled when the
+    Settings toggle is off."""
+    if not filepaths:
+        return
+    if not AUTO_SYNC_MIXXX:
+        print("Auto Mixxx song sync: disabled in Settings", flush=True)
+        return
+    def work():
+        try:
+            with _MIXXX_SYNC_LOCK:
+                result = sync_new_songs_to_mixxx(filepaths)
+            if result.get('ok'):
+                print(f"Auto Mixxx song sync: {result.get('synced')} added, "
+                      f"{result.get('already_in_mixxx')} already in Mixxx", flush=True)
+            else:
+                print(f"Auto Mixxx song sync skipped: {result.get('error')}", flush=True)
+        except Exception as e:
+            print(f"Auto Mixxx song sync failed: {e}", flush=True)
+    threading.Thread(target=work, daemon=True).start()
+
 
 def outgoing_transitions_for(song_id):
     """One song's outgoing transitions with target names resolved, in the same
@@ -1061,10 +1238,15 @@ def sync_transitions_after_change(song_id):
     so the app and Mixxx both stay in step with the DB. Failures are logged,
     never surfaced -- Mixxx being open or unreachable just logs and skips."""
     def work():
+        # Transition notes ride in the rekordbox.xml Comments field -- refresh
+        # the on-disk export so DJUCED / Rekordbox / Serato get the new text.
+        queue_auto_export()
         try:
             sync_song_transition_tags(song_id)
         except Exception as e:
             print(f"Transition tag sync failed: {e}", flush=True)
+        if not AUTO_SYNC_MIXXX:
+            return  # Mixxx syncing is turned off in Settings
         try:
             with _MIXXX_SYNC_LOCK:
                 result = sync_transitions_to_mixxx()
@@ -1082,8 +1264,42 @@ def sync_transitions_after_change(song_id):
 
 @app.route('/api/config')
 def api_config():
-    """Exposes the configured music folder so the frontend never hardcodes it."""
-    return jsonify({'music_dir': MUSIC_DIR})
+    """Exposes the configured music folder, auto-export path and DJ-software
+    choice so the frontend never hardcodes them."""
+    return jsonify(_config_dict())
+
+
+@app.route('/api/config', methods=['POST'])
+def update_config():
+    """Runtime settings saved from the Settings tab: the chosen DJ software,
+    the rekordbox.xml export path, and the Mixxx auto-sync toggle. Writing
+    straight into config.json means every change survives restarts."""
+    data = request.json or {}
+    updates = {}
+    if 'djs_software' in data:
+        sw = str(data['djs_software']).strip()
+        # '' = not chosen yet (first-run state, Mixxx-style buttons shown)
+        if sw not in ('', 'mixxx', 'rekordbox', 'serato', 'djuced', 'engine', 'none'):
+            return jsonify({'error': 'unknown software'}), 400
+        updates['djs_software'] = sw
+    if 'rekordbox_export_path' in data:
+        p = str(data['rekordbox_export_path']).strip()
+        if not p:
+            return jsonify({'error': 'path required'}), 400
+        # A folder picked in the browse dialog (no .xml suffix) becomes
+        # <folder>/rekordbox.xml -- the filename Bridge / Serato / DJUCED expect.
+        if not p.lower().endswith('.xml'):
+            p = os.path.join(p.rstrip('/'), 'rekordbox.xml')
+        updates['rekordbox_export_path'] = p
+    if 'auto_sync_mixxx' in data:
+        updates['auto_sync_mixxx'] = bool(data['auto_sync_mixxx'])
+    if not updates:
+        return jsonify({'error': 'no valid fields'}), 400
+    _save_config(updates)
+    if 'rekordbox_export_path' in updates:
+        # Regenerate the file at the new location immediately.
+        queue_auto_export()
+    return jsonify(_config_dict())
 
 @app.route('/api/songs')
 def get_songs():
@@ -1145,6 +1361,7 @@ def delete_song(song_id):
         if os.path.exists(filepath): os.remove(filepath)
         _delete_song_rows(db, [song_id])
         db.commit()
+    queue_auto_export()
     return jsonify({'deleted':filepath})
 
 @app.route('/api/folder/delete', methods=['POST'])
@@ -1171,6 +1388,9 @@ def delete_folder():
                 except OSError: pass
         _delete_song_rows(db, [r['id'] for r in targets])
         db.commit()
+    if targets:
+        # Library changed -- refresh the on-disk rekordbox.xml.
+        queue_auto_export()
     # Only succeeds once every file inside is gone -- leaves the folder alone
     # if the user added non-audio files to it that we shouldn't touch.
     try: os.rmdir(folder_path)
@@ -1402,7 +1622,10 @@ def import_folder():
                 counter += 1
 
             _shutil.copy2(src_path, dest_path)
-            add_file_to_db(dest_path)
+            if add_file_to_db(dest_path):
+                # Newly imported song -- push it into Mixxx in the background.
+                auto_sync_new_songs([dest_path])
+                queue_auto_export()
 
             with get_db() as db:
                 row = db.execute('SELECT id FROM songs WHERE filepath=?', (dest_path,)).fetchone()
@@ -1939,6 +2162,7 @@ def create_crate():
             (name, 1 if smart else 0, rules))
         db.commit()
         cid = db.execute('SELECT last_insert_rowid()').fetchone()[0]
+    queue_auto_export()
     return jsonify({'id':cid,'name':name})
 
 @app.route('/api/crates/<int:crate_id>', methods=['PATCH'])
@@ -1951,6 +2175,7 @@ def update_crate(crate_id):
             db.execute('UPDATE crates SET rules=? WHERE id=?',
                 (json.dumps(data['rules']),crate_id))
         db.commit()
+    queue_auto_export()
     return jsonify({'ok':True})
 
 @app.route('/api/crates/<int:crate_id>', methods=['DELETE'])
@@ -1959,6 +2184,7 @@ def delete_crate(crate_id):
         db.execute('DELETE FROM crates WHERE id=?',(crate_id,))
         db.execute('DELETE FROM crate_songs WHERE crate_id=?',(crate_id,))
         db.commit()
+    queue_auto_export()
     return jsonify({'ok':True})
 
 @app.route('/api/crates/<int:crate_id>/songs')
@@ -1997,6 +2223,7 @@ def add_songs_to_crate(crate_id):
             db.execute('INSERT OR IGNORE INTO crate_songs (crate_id, song_id) VALUES (?, ?)',
                 (crate_id, song_id))
         db.commit()
+    queue_auto_export()
     return jsonify({'ok': True, 'added': len(song_ids)})
 
 @app.route('/api/crates/<int:crate_id>/remove-songs', methods=['POST'])
@@ -2009,6 +2236,7 @@ def remove_songs_from_crate(crate_id):
             db.execute('DELETE FROM crate_songs WHERE crate_id=? AND song_id=?',
                 (crate_id, song_id))
         db.commit()
+    queue_auto_export()
     return jsonify({'ok': True})
 
 @app.route('/api/crates/<int:crate_id>/sync-mixxx', methods=['POST'])
@@ -2383,6 +2611,77 @@ def build_rekordbox_xml(songs, playlists):
             '</DJ_PLAYLISTS>\n')
 
 
+# -- AUTO-EXPORT (rekordbox.xml stays current on disk) ----------------------
+# Every library change (download, import, transition, crate, delete, analysis)
+# queues a background rewrite of REKORDBOX_EXPORT_PATH so DJUCED / Rekordbox /
+# Serato always have a fresh file to import. Writes are coalesced and skip
+# when the content is unchanged, so a burst of triggers costs one build.
+
+_rekordbox_export_q = queue.Queue(maxsize=1)
+
+
+def _whole_library_export():
+    """(songs, playlists) for the full-library rekordbox export -- shared by the
+    on-disk auto-export and the manual download endpoint."""
+    with get_db() as db:
+        rows = db.execute('SELECT * FROM songs ORDER BY artist, title').fetchall()
+        crates = db.execute('SELECT id, name FROM crates ORDER BY name').fetchall()
+    songs = [dict(r) for r in rows]
+    playlists = [(c['name'], crate_song_ids(c['id'])) for c in crates]
+    return songs, playlists
+
+
+def write_rekordbox_xml_file():
+    """Writes the whole-library rekordbox XML to REKORDBOX_EXPORT_PATH. Skips
+    the write when the content is unchanged, so repeated triggers are cheap.
+    Never raises -- failures are logged so auto-export can never break a
+    request. Returns True if the file was written."""
+    try:
+        songs, playlists = _whole_library_export()
+        xml = build_rekordbox_xml(songs, playlists)
+        os.makedirs(os.path.dirname(REKORDBOX_EXPORT_PATH) or '.', exist_ok=True)
+        try:
+            with open(REKORDBOX_EXPORT_PATH, 'r', encoding='utf-8') as f:
+                if f.read() == xml:
+                    return False
+        except OSError:
+            pass
+        tmp = REKORDBOX_EXPORT_PATH + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            f.write(xml)
+        os.replace(tmp, REKORDBOX_EXPORT_PATH)
+        print(f"Auto rekordbox export: {len(songs)} tracks, "
+              f"{len(playlists)} playlists -> {REKORDBOX_EXPORT_PATH}", flush=True)
+        return True
+    except Exception as e:
+        print(f"Auto rekordbox export failed: {e}", flush=True)
+        return False
+
+
+def _rekordbox_export_worker():
+    while True:
+        _rekordbox_export_q.get()
+        try:
+            write_rekordbox_xml_file()
+        except Exception as e:
+            print(f"Auto rekordbox export failed: {e}", flush=True)
+        _rekordbox_export_q.task_done()
+
+
+threading.Thread(target=_rekordbox_export_worker, daemon=True).start()
+
+
+def queue_auto_export():
+    """Requests a background rewrite of the on-disk rekordbox.xml. Coalesces:
+    if a rewrite is already pending or running, this request is dropped -- the
+    pending write will produce the same file anyway. Non-blocking; call it
+    from any route after a change is committed."""
+    try:
+        _rekordbox_export_q.put_nowait(True)
+    except queue.Full:
+        pass
+
+
 @app.route('/api/export/rekordbox-xml')
 def export_rekordbox_xml():
     """Whole library, or a single crate (?crate_id=N), as the standard
@@ -2404,12 +2703,11 @@ def export_rekordbox_xml():
         xml = build_rekordbox_xml(songs, [(name, ids)])
         fname = re.sub(r'[^A-Za-z0-9._-]+', '-', name).strip('-') or 'crate'
     else:
-        with get_db() as db:
-            rows = db.execute('SELECT * FROM songs ORDER BY artist, title').fetchall()
-            crates = db.execute('SELECT id, name FROM crates ORDER BY name').fetchall()
-        songs = [dict(r) for r in rows]
-        playlists = [(c['name'], crate_song_ids(c['id'])) for c in crates]
+        songs, playlists = _whole_library_export()
         xml = build_rekordbox_xml(songs, playlists)
+        # Keep the on-disk file (that Bridge / DJUCED / Serato import from)
+        # fresh even when the user triggers a manual export.
+        write_rekordbox_xml_file()
         fname = 'rekordbox'
     resp = Response(xml, mimetype='application/xml')
     resp.headers['Content-Disposition'] = f'attachment; filename={fname}.xml'
@@ -2439,6 +2737,9 @@ if __name__ == '__main__':
     msg = f"{count} new songs"
     if purged: msg += f", {purged} missing removed"
     print(msg)
+    # Guarantee the on-disk rekordbox.xml exists and is current (a no-op when
+    # it already matches, so this is cheap on every launch).
+    queue_auto_export()
     observer = Observer()
     observer.schedule(MusicFolderHandler(), MUSIC_DIR, recursive=True)
     observer.start()

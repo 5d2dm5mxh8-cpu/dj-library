@@ -2,5 +2,8 @@
   "music_dir": "/Users/you/Music",
   "spotify_client_id": "",
   "spotify_client_secret": "",
-  "ffmpeg_path": "/opt/homebrew/bin/ffmpeg"
+  "ffmpeg_path": "/opt/homebrew/bin/ffmpeg",
+  "rekordbox_export_path": "~/.dj-library/rekordbox.xml",
+  "djs_software": "",
+  "auto_sync_mixxx": true
 }
