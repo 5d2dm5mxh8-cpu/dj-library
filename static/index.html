@@ -4,6 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>DJ Library</title>
+<meta name="description" content="Self-hosted DJ music library manager">
+<meta name="theme-color" content="#0d0d0f" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f5f6fa" media="(prefers-color-scheme: light)">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon.svg">
 <script>
 // Apply the saved (or system) theme before first paint to avoid a flash.
 (function(){
@@ -176,6 +182,10 @@ header .rule-sel:focus{border-color:var(--cyan);box-shadow:0 0 0 3px var(--cyan-
 .theme-toggle:hover{background:var(--chip-2);color:var(--text);border-color:var(--border-strong);
   transform:translateY(-1px)}
 .theme-toggle:active{transform:scale(.9)}
+.pwa-install{font-family:var(--mono);font-size:10.5px;letter-spacing:.05em;color:var(--cyan);
+  background:var(--cyan-dim);border:1px solid var(--cyan);border-radius:10px;
+  padding:0 12px;height:34px;cursor:pointer;transition:all .15s;align-items:center;flex-shrink:0}
+.pwa-install:hover{background:var(--cyan);color:#0d0d0f}
 
 /* selection toolbar -- floating glass bar that drops in over the content,
    so selecting songs never shoves the layout around */
@@ -701,6 +711,7 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
     <option value="file_size_bytes">Sort: File size</option>
     <option value="added_at">Sort: Date added (newest first)</option>
   </select>
+  <button class="pwa-install" id="installBtn" onclick="installPwa()" style="display:none" title="Install DJ Library as an app">⧉&nbsp;Install App</button>
   <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()"
     aria-label="Toggle light or dark mode" title="Toggle light or dark mode"></button>
   <div class="track-count"><b id="visibleCount">0</b> / <span id="totalCount">0</span> tracks</div>
@@ -1472,7 +1483,17 @@ async function init() {
     if (!window.djsSoftware && !localStorage.getItem('introDismissed'))
       setTimeout(openIntroGuide, 500);
   } catch(_) {}
+  // PWA: cache the app shell so the installed app opens offline/fast.
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js').catch(e=>console.error('SW register failed:',e));
+    window.addEventListener('beforeinstallprompt', e=>{
+      e.preventDefault();
+      window._deferredPrompt = e;   // shown via the header install button instead
+      const b=document.getElementById('installBtn'); if(b) b.style.display='inline-flex';
+    });
+  }
 }
+
 
 // ── DATA ──────────────────────────────────────────────────────────────────────
 async function loadSongs(crateId=null) {
@@ -1618,6 +1639,14 @@ function closeIntroGuide(){
 function finishIntro(){
   if(!window.djsSoftware){ alert('Pick a software above first — “Just organizing” works too.'); return; }
   closeIntroGuide();
+}
+
+// PWA 'Install App' — shows the browser's native install prompt when the
+// beforeinstallprompt event fires (supported in Chrome/Edge). Safari uses
+// Share > Add to Dock instead, which needs no button.
+function installPwa(){
+  const e=window._deferredPrompt;
+  if(e){ e.prompt(); e.userChoice.then(()=>{ window._deferredPrompt=null; const b=document.getElementById('installBtn'); if(b) b.style.display='none'; }); }
 }
 
 // ── FOLDERS ───────────────────────────────────────────────────────────────────

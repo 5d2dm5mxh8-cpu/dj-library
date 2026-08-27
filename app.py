@@ -2714,6 +2714,20 @@ def export_rekordbox_xml():
     return resp
 
 
+@app.route('/manifest.webmanifest')
+def manifest():
+    return send_from_directory('static', 'manifest.webmanifest',
+                               mimetype='application/manifest+json')
+
+@app.route('/icon.svg')
+def app_icon():
+    return send_from_directory('static', 'icon.svg', mimetype='image/svg+xml')
+
+@app.route('/sw.js')
+def service_worker():
+    return send_from_directory('static', 'sw.js', mimetype='application/javascript',
+                               max_age=0)  # never cache the SW itself
+
 @app.route('/')
 def index():
     return send_from_directory('static','index.html')

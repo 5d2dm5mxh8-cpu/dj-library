@@ -73,6 +73,24 @@ We're going to:
 You don't need a GitHub account to download or run it. (If you ever want to,
 "Star" the repo on the GitHub page to bookmark it.)
 
+### The quick way (one double-click)
+
+If the autor has shared a pre-built `install.command` file with you (or you
+downloaded the ZIP and see `install.command` inside the `dj-library-main`
+folder):
+
+1. Put `install.command` inside the `dj-library-main` folder you unzipped
+   (`~/Downloads/dj-library-main`).
+2. **Double-click `install.command`.** macOS may ask “open programs downloaded
+   from the internet?” — click *Open*. It downloads the code you're reading
+   right now, installs the small Python packages it needs, creates the settings
+   file, starts the app in the background, and opens it in your browser in one
+   go. You only need to do Step 2 (install Python) and Step 4 (install ffmpeg)
+   below first — and only once.
+
+The rest of this section is the fully-manual route, so you understand exactly
+what's happening.
+
 ### Step 1 — Download the code
 
 You have two options; pick one:
@@ -163,6 +181,22 @@ python3.11 app.py
 Leave that terminal window open. Open your browser and go to
 **http://localhost:3000** — you should see the app. The first launch scans your
 music folder, so give it a minute if you have a big library.
+
+### Bonus — install it as a real app (PWA)
+
+Once it's running, you can make it open in its own window with a Dock icon
+(no address bar), just like a normal Mac app:
+
+- **Safari:** with http://localhost:3000 open, click the **Share** button in the
+  toolbar → **Add to Dock**. Done — a “DJ Library” app with its own icon now
+  launches the library in a standalone window.
+- **Chrome / Edge:** in the address bar there's an **install icon** (or the app
+  shows an “Install App” button in the header). Click it to install. The app
+  then opens from your Applications / Dock and works even when the server
+  isn't reachable (it shows your last-loaded library).
+
+The Flask server still needs to be running for the live features (search,
+downloads, sync) — the PWA is the window, the server is the engine.
 
 ### Step 7 — Make it start automatically (optional but recommended)
 
