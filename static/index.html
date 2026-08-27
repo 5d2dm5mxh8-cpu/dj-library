@@ -837,7 +837,7 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
         <input type="text" class="fi" id="importFolderPath"
           placeholder="/Users/you/Downloads/some-folder"
           onkeydown="if(event.key==='Enter')startFolderImport()">
-        <button class="btn-ghost" onclick="openFolderPicker()" style="flex-shrink:0"
+        <button class="btn-ghost" onclick="openFolderPicker()" style="flex-shrink:0;width:auto"
           title="Browse or search for a folder">🔍 Browse…</button>
       </div>
 
@@ -943,7 +943,7 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
           <input type="text" class="fi" id="exportPathInput" spellcheck="false"
             placeholder="~/.dj-library/rekordbox.xml"
             onkeydown="if(event.key==='Enter')saveExportPath()">
-          <button class="btn-ghost" onclick="openFolderPicker('export')" style="flex-shrink:0"
+          <button class="btn-ghost" onclick="openFolderPicker('export')" style="flex-shrink:0;width:auto"
             title="Pick a folder — the file rekordbox.xml is written inside it">🔍 Browse…</button>
           <button class="btn-save" onclick="saveExportPath()" style="flex-shrink:0">Save</button>
         </div>
