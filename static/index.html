@@ -964,8 +964,34 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
       </div>
 
       <div style="margin-top:18px">
+        <div class="sb-label">Key display</div>
+        <div class="sw-pills" id="keyDisplayPills">
+          <button class="sw-pill" data-sw="camelot" onclick="chooseKeyDisplay('camelot')">Camelot wheel (1A / 3B)</button>
+          <button class="sw-pill" data-sw="notation" onclick="chooseKeyDisplay('notation')">Notation (Am / Bbm)</button>
+        </div>
+        <div class="tool-hint" style="margin-top:8px">How keys are shown in the KEY column and the song editor.
+          Only the display changes — what's stored in each file is never rewritten.</div>
+      </div>
+
+      <div class="tool-card" style="margin-top:14px">
+        <div class="tool-opt">
+          <div class="tool-opt-text">
+            <div class="tool-opt-name">Auto-install Python in the installer</div>
+            <div class="tool-opt-desc">When someone runs install.command on a computer without Python, offer to
+              install it automatically (instead of just erroring). Applied to new installs.</div>
+          </div>
+          <label class="switch" title="Auto-install Python in new installs">
+            <input type="checkbox" id="autoInstallPythonCheckbox" onchange="toggleAutoInstallPython()">
+            <span class="switch-track"></span>
+          </label>
+        </div>
+      </div>
+
+      <div style="margin-top:18px">
         <div class="sb-label">Getting started</div>
         <button class="btn-ghost" onclick="openIntroGuide()">📖 Open the intro guide</button>
+        <button class="btn-ghost" onclick="reShowWelcome()">↻ Re-show the welcome screen</button>
+        <div class="tool-hint">Pick your DJ software, then the intro walks you through the workflow for it.</div>
       </div>
     </div>
   </div>
@@ -1466,9 +1492,14 @@ async function init() {
     }
     window.djsSoftware = (cfg && cfg.djs_software) || '';
     window.autoSyncMixxx = !cfg || cfg.auto_sync_mixxx !== false;
+    window.keyDisplay = (cfg && cfg.key_display) || 'camelot';
+    window.autoInstallPython = !cfg || cfg.auto_install_python !== false;
     const toggle = document.getElementById('autoSyncMixxxCheckbox');
     if (toggle) toggle.checked = window.autoSyncMixxx;
+    const pyTog = document.getElementById('autoInstallPythonCheckbox');
+    if (pyTog) pyTog.checked = window.autoInstallPython;
     applySoftwareUI();
+    applyKeyDisplayUI();
   } catch(e) { console.error('Failed to load config:', e); }
   renderSoftwarePills('swPills');
   buildKeyPills();
@@ -1634,6 +1665,44 @@ function openIntroGuide(){
 function closeIntroGuide(){
   document.getElementById('introModal').classList.remove('open');
   try{ localStorage.setItem('introDismissed','1'); }catch(_){}
+}
+
+// Key display unit toggle (Camelot wheel vs musical notation). Display-only.
+async function chooseKeyDisplay(u){
+  if(u!=='camelot' && u!=='notation') return;
+  window.keyDisplay=u;
+  applyKeyDisplayUI();
+  try{
+    await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({key_display:u})});
+    // Re-render the visible track rows with the new unit.
+    applyFilters();
+    // Kept simple: the KEY column + pills update live; an open info modal
+    // re-shows on its next open. See openInfoModal.
+  }catch(e){ console.error('Save key display failed:',e); }
+}
+
+// Persist the installer's auto-install-Python choice.
+async function toggleAutoInstallPython(){
+  const on=document.getElementById('autoInstallPythonCheckbox').checked;
+  window.autoInstallPython=on;
+  try{
+    await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({auto_install_python:on})});
+  }catch(e){ console.error('Save auto-install python failed:',e); }
+}
+
+// Re-show the first-run welcome guide (clears the dismissed flag + reopens it).
+function reShowWelcome(){
+  try{ localStorage.removeItem('introDismissed'); }catch(_){}
+  openIntroGuide();
+}
+
+function applyKeyDisplayUI(){
+  // Toggle the active pill in the key-display selector.
+  document.querySelectorAll('#keyDisplayPills .sw-pill').forEach(p=>{
+    p.classList.toggle('active', p.dataset.sw===window.keyDisplay);
+  });
 }
 
 function finishIntro(){
@@ -2281,7 +2350,7 @@ function renderSongs(songs){
     const artist=esc(s.artist||'—');
     const genre=s.genre?esc(s.genre):null;
     const bpm=s.bpm?Math.round(s.bpm):'—';
-    const key=esc(toCamelot(s.musical_key)||s.musical_key||'—');
+    const key=esc(displayKey(s.musical_key)||'—');
     const dur=fmtDur(s.duration_seconds);
     const size=fmtSize(s.file_size_bytes);
     const fp=esc(s.filepath);
@@ -2435,7 +2504,7 @@ async function openInfoModal(ids, event){
     {key:'year',   label:'Year',   val:isBatchEdit?'':(firstSong?.year||'')},
     {key:'genre',  label:'Genre',  val:isBatchEdit?'':(firstSong?.genre||''), list:'genreEditList'},
     {key:'bpm',    label:'BPM',    val:isBatchEdit?'':(firstSong?.bpm?Math.round(firstSong.bpm):'')},
-    {key:'musical_key',label:'Key',val:isBatchEdit?'':(toCamelot(firstSong?.musical_key)||firstSong?.musical_key||'')},
+    {key:'musical_key',label:'Key',val:isBatchEdit?'':(displayKey(firstSong?.musical_key)||'')},
   ];
 
   document.getElementById('infoGrid').innerHTML = fields.map(f=>`
@@ -3139,7 +3208,7 @@ async function openMerge(songIds) {
     <div class="ig">
       ${fields.map(f => {
         const raw=data.merged_fields[f.key]??'';
-        const val=f.key==='musical_key'?(toCamelot(raw)||raw||''):raw;
+        const val=f.key==='musical_key'?(displayKey(raw)||''):raw;
         return `
         <div class="il">${f.label}</div>
         <input class="ii" id="merge-${f.key}" value="${esc(String(val))}"
@@ -3313,6 +3382,13 @@ function camelotNum(k){
   if(!m) return null;
   const p=m.match(/^([0-9]+)([AB])$/);
   return p ? ((+p[1]-1)*2 + (p[2]==='A'?0:1)) : null;
+}
+// Display key for the given stored key, per the user's key_display setting.
+function displayKey(raw){
+  if(!raw) return null;
+  const c=toCamelot(raw);
+  if(!c) return raw;                 // not recognized -> show as-is
+  return (window.keyDisplay==='notation') ? (fromCamelot(c)||raw) : c;
 }
 function cleanName(n){return n.replace(/\.(mp3|wav|flac|m4a)$/i,'').replace(/\(SPOTISAVER\)/g,'').trim()}
 function esc(s){if(!s)return'';return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')}

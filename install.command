@@ -26,9 +26,47 @@ for c in python3.13 python3.12 python3.11 python3; do
   fi
 done
 if [ -z "$PY" ]; then
-  echo "❌ No Python 3 found. Install it from https://www.python.org/downloads/macos/"
-  echo "   (Download → open the installer → click through), then run this again."
-  read -n 1 -s -r -p "   Press any key to close…"; echo; exit 1
+  echo ""
+  echo "⚠  No Python 3 was found on this computer."
+  echo "     DJ Library is written in Python, so it needs it to run."
+
+  # Honor the saved preference from ~/.dj-library/config.json (the user can
+  # change it in the app's ⚙ Settings later).
+  AUTO="yes"
+  if [ -f "$HOME/.dj-library/config.json" ]; then
+    if grep -q '"auto_install_python" *: *false' "$HOME/.dj-library/config.json" 2>/dev/null; then
+      AUTO="no"
+    fi
+  fi
+  if [ "$AUTO" = "yes" ]; then
+    default_y="y"
+  else
+    default_y="n"
+  fi
+
+  if command -v brew >/dev/null 2>&1; then
+    echo ""
+    read -r -p "   Auto-install Python now with Homebrew? [Y/n] " ans
+    ans="${ans:-$default_y}"
+    case "$ans" in
+      [Yy]*)
+        echo "   Installing Python 3.11 (this can take a few minutes)…"
+        brew install python@3.11 || brew install python3 || { echo "❌ Homebrew install of Python failed."; read -n 1 -s -r -p "   Press any key to close…"; echo; exit 1; }
+        PY="$(command -v python3.11 || command -v python3)"
+        ;;
+      *)
+        echo "   OK, you'll install Python manually from https://www.python.org/downloads/macos/"
+        read -n 1 -s -r -p "   Press any key to close…"; echo; exit 1
+        ;;
+    esac
+  else
+    echo "   This Mac doesn't have Homebrew yet, and without it I can't install Python"
+    echo "   silently for you. Easiest fix (one command):"
+    echo "     /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+    echo ""
+    echo "   …or download Python from https://www.python.org/downloads/macos/ and run its installer."
+    read -n 1 -s -r -p "   Press any key to close…"; echo; exit 1
+  fi
 fi
 echo "✓ Found Python: $PY"
 

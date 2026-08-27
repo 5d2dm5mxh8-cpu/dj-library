@@ -252,6 +252,8 @@ for the values below.
 | `rekordbox_export_path` | Where the always-current `rekordbox.xml` is written (changeable in ⚙ Settings) |
 | `djs_software` | Your DJ software: `mixxx`, `rekordbox`, `serato`, `djuced`, `engine`, `none`, or `""` (not chosen yet) — set from the ⚙ Settings tab |
 | `auto_sync_mixxx` | `true`/`false` — whether new songs are automatically pushed into Mixxx (toggle in ⚙ Settings) |
+| `key_display` | How keys are shown: `camelot` (1A/3B) or `notation` (Am/Bbm) — display-only, stored keys are untouched (⚙ Settings) |
+| `auto_install_python` | `true`/`false` — whether install.command offers to auto-install Python when it's missing (⚙ Settings) |
 
 ## Spotify setup (optional, for the downloader)
 

@@ -7,6 +7,9 @@ PLIST="$HOME/Library/LaunchAgents/com.milan.djlibrary.plist"
 mkdir -p "$APP_DIR/static"
 cp "$(dirname "$0")/app.py" "$APP_DIR/app.py"
 cp "$(dirname "$0")/static/index.html" "$APP_DIR/static/index.html"
+for f in manifest.webmanifest icon.svg sw.js; do
+  [ -f "$(dirname "$0")/static/$f" ] && cp "$(dirname "$0")/static/$f" "$APP_DIR/static/$f"
+done
 
 # LaunchAgent — this is macOS's built-in way to run something automatically
 # at login, in the background, without needing a separate app.

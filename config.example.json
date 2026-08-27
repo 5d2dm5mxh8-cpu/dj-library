@@ -5,5 +5,7 @@
   "ffmpeg_path": "/opt/homebrew/bin/ffmpeg",
   "rekordbox_export_path": "~/.dj-library/rekordbox.xml",
   "djs_software": "",
-  "auto_sync_mixxx": true
+  "auto_sync_mixxx": true,
+  "key_display": "camelot",
+  "auto_install_python": true
 }

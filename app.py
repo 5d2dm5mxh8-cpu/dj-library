@@ -48,6 +48,12 @@ DJS_SOFTWARE = _config.get("djs_software", "")
 # Whether newly-added songs are auto-pushed into Mixxx's library (Settings
 # tab toggle; default on).
 AUTO_SYNC_MIXXX = bool(_config.get("auto_sync_mixxx", True))
+# How musical keys are shown: "camelot" wheel (1A/3B) or "notation"
+# (Am/Bbm). Display-only -- stored keys are never rewritten.
+KEY_DISPLAY = _config.get("key_display", "camelot")
+# Whether new external installs should auto-install Python if it's missing
+# (the installer asks, defaulting to this saved preference).
+AUTO_INSTALL_PYTHON = bool(_config.get("auto_install_python", True))
 
 
 def _config_dict():
@@ -55,14 +61,16 @@ def _config_dict():
     return {'music_dir': MUSIC_DIR,
             'rekordbox_export_path': REKORDBOX_EXPORT_PATH,
             'djs_software': DJS_SOFTWARE,
-            'auto_sync_mixxx': AUTO_SYNC_MIXXX}
+            'auto_sync_mixxx': AUTO_SYNC_MIXXX,
+            'key_display': KEY_DISPLAY,
+            'auto_install_python': AUTO_INSTALL_PYTHON}
 
 
 def _save_config(updates):
     """Merges `updates` into config.json (preserving existing keys, including
     the Spotify secrets) and refreshes the affected module-level settings.
     Only settings that can change at runtime are updated here."""
-    global _config, REKORDBOX_EXPORT_PATH, DJS_SOFTWARE, AUTO_SYNC_MIXXX
+    global _config, REKORDBOX_EXPORT_PATH, DJS_SOFTWARE, AUTO_SYNC_MIXXX, KEY_DISPLAY, AUTO_INSTALL_PYTHON
     path = os.path.expanduser("~/.dj-library/config.json")
     data = dict(_config)
     data.update(updates)
@@ -75,6 +83,10 @@ def _save_config(updates):
         DJS_SOFTWARE = updates['djs_software']
     if 'auto_sync_mixxx' in updates:
         AUTO_SYNC_MIXXX = bool(updates['auto_sync_mixxx'])
+    if 'key_display' in updates:
+        KEY_DISPLAY = updates['key_display']
+    if 'auto_install_python' in updates:
+        AUTO_INSTALL_PYTHON = bool(updates['auto_install_python'])
 
 # -- DATABASE --------------------------------------------------------------
 
@@ -1293,6 +1305,13 @@ def update_config():
         updates['rekordbox_export_path'] = p
     if 'auto_sync_mixxx' in data:
         updates['auto_sync_mixxx'] = bool(data['auto_sync_mixxx'])
+    if 'key_display' in data:
+        kd = str(data['key_display']).strip()
+        if kd not in ('camelot', 'notation'):
+            return jsonify({'error': 'unknown key_display'}), 400
+        updates['key_display'] = kd
+    if 'auto_install_python' in data:
+        updates['auto_install_python'] = bool(data['auto_install_python'])
     if not updates:
         return jsonify({'error': 'no valid fields'}), 400
     _save_config(updates)
