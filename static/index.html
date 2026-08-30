@@ -713,8 +713,10 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
     <option value="bpm">Sort: BPM</option>
     <option value="duration_seconds">Sort: Duration</option>
     <option value="file_size_bytes">Sort: File size</option>
+    <option value="play_count">Sort: Play count</option>
     <option value="added_at">Sort: Date added (newest first)</option>
   </select>
+  <button class="pwa-install" id="transTryBtn" onclick="showTab('transitions')" style="display:none;margin-right:6px" title="Transitions marked “to try” — untested mixes awaiting a live check">🧪&nbsp;<span id="transTryCount">0</span> to try</button>
   <button class="pwa-install" id="installBtn" onclick="installPwa()" style="display:none" title="Install DJ Library as an app">⧉&nbsp;Install App</button>
   <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()"
     aria-label="Toggle light or dark mode" title="Toggle light or dark mode"></button>
@@ -781,6 +783,10 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
     <div class="folder-row">
       <input type="text" class="fi" id="folderInput" placeholder="Folder (optional)" list="folderSuggestions">
       <datalist id="folderSuggestions"></datalist>
+      <button class="btn-ghost" onclick="openFolderPicker('download')" style="flex-shrink:0;width:auto" title="Browse or search for a folder">🔍 Browse…</button>
+      <select class="rule-sel" id="downloadCrateSelect" style="max-width:170px" title="Add downloaded songs to this crate">
+        <option value="">No crate</option>
+      </select>
       <button class="btn" onclick="startDownload()">GET</button>
     </div>
     <div class="sp hidden" id="dlStatus"><div class="dot"></div><span id="dlStatusText"></span></div>
@@ -954,6 +960,12 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
       </div>
 
       <div class="tool-card" style="margin-top:14px">
+        <button class="btn-ghost mixxx-only" onclick="syncMixxxPlayCounts()" style="width:100%">↻ Import play counts from Mixxx</button>
+        <div class="tool-hint mixxx-only" style="margin-top:8px">Reads Mixxx’s play history without modifying its database. Automatic sync runs during library activity, at most once per minute, when Mixxx is closed.</div>
+        <label class="tool-opt mixxx-only" style="cursor:pointer">
+          <span class="tool-opt-text"><span class="tool-opt-name">Sync play counts during activity</span></span>
+          <input type="checkbox" id="autoSyncMixxxPlaysCheckbox" onchange="saveAutoSyncMixxxPlays()">
+        </label>
         <div class="tool-opt">
           <div class="tool-opt-text">
             <div class="tool-opt-name mixxx-only">Auto-add new songs to Mixxx</div>
@@ -978,17 +990,11 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
       </div>
 
       <div class="tool-card" style="margin-top:14px">
-        <div class="tool-opt">
-          <div class="tool-opt-text">
-            <div class="tool-opt-name">Auto-install Python in the installer</div>
-            <div class="tool-opt-desc">When someone runs install.command on a computer without Python, offer to
-              install it automatically (instead of just erroring). Applied to new installs.</div>
-          </div>
-          <label class="switch" title="Auto-install Python in new installs">
-            <input type="checkbox" id="autoInstallPythonCheckbox" onchange="toggleAutoInstallPython()">
-            <span class="switch-track"></span>
-          </label>
-        </div>
+        <button class="btn-ghost" onclick="checkPython()" id="installPythonBtn"
+          style="width:100%">🛠 Install Python…</button>
+        <div class="tool-hint" id="pythonStatusHint" style="margin-top:8px">Checks whether a
+          usable Python 3 is available on this Mac — the one install.command needs to set things up.
+          The app itself already runs on Python, so this usually just confirms what's installed.</div>
       </div>
 
       <div style="margin-top:18px">
@@ -1239,6 +1245,7 @@ let selectedIds = new Set();
 let currentFolder = null;
 let currentCrate  = null;
 let currentSort   = { field:'title', asc:true };
+let currentTryId  = null; // transition currently being tried
 let activeKeys    = new Set();
 let bpmActive = false, durActive = false;
 let currentSong   = null;
@@ -1268,8 +1275,10 @@ const COLUMN_CONFIG = {
   musical_key:       { label: 'Key',   width: '64px' },
   duration_seconds:  { label: 'Dur',   width: '60px' },
   file_size_bytes:   { label: 'Size',  width: '56px' },
+  play_count:        { label: 'Plays', width: '56px' },
+  least_played:      { label: 'Least played', width: '80px' },
 };
-const DEFAULT_COLUMN_ORDER = ['title','genre','bpm','musical_key','duration_seconds','file_size_bytes'];
+const DEFAULT_COLUMN_ORDER = ['title','genre','bpm','musical_key','duration_seconds','file_size_bytes','play_count'];
 let columnOrder = loadColumnOrder();
 let dragColKey = null;
 
@@ -1496,12 +1505,13 @@ async function init() {
     }
     window.djsSoftware = (cfg && cfg.djs_software) || '';
     window.autoSyncMixxx = !cfg || cfg.auto_sync_mixxx !== false;
+    window.autoSyncMixxxPlays = !cfg || cfg.auto_sync_mixxx_plays !== false;
     window.keyDisplay = (cfg && cfg.key_display) || 'camelot';
-    window.autoInstallPython = !cfg || cfg.auto_install_python !== false;
+    window.autoInstallPython = !cfg || cfg.auto_install_python !== false;   // still honoured by install.command's installer
     const toggle = document.getElementById('autoSyncMixxxCheckbox');
     if (toggle) toggle.checked = window.autoSyncMixxx;
-    const pyTog = document.getElementById('autoInstallPythonCheckbox');
-    if (pyTog) pyTog.checked = window.autoInstallPython;
+    const playToggle = document.getElementById('autoSyncMixxxPlaysCheckbox');
+    if (playToggle) playToggle.checked = window.autoSyncMixxxPlays;
     applySoftwareUI();
     applyKeyDisplayUI();
   } catch(e) { console.error('Failed to load config:', e); }
@@ -1512,6 +1522,7 @@ async function init() {
   await loadCrates();
   await checkDuplicates();
   await loadGenreSuggestions();
+  refreshTransTryBadge();
   // First-run onboarding: show the intro until a software is picked (or the
   // user dismisses it once in this browser).
   try {
@@ -1649,6 +1660,15 @@ async function saveExportPath(){
   }catch(e){ alert('Save failed: '+e.message); }
 }
 
+async function saveAutoSyncMixxxPlays(){
+  const on=document.getElementById('autoSyncMixxxPlaysCheckbox').checked;
+  window.autoSyncMixxxPlays=on;
+  try{
+    await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({auto_sync_mixxx_plays:on})});
+  }catch(e){ console.error('Failed to save play-count sync:',e); }
+}
+
 async function saveAutoSyncMixxx(){
   const on=document.getElementById('autoSyncMixxxCheckbox').checked;
   window.autoSyncMixxx=on;
@@ -1686,14 +1706,37 @@ async function chooseKeyDisplay(u){
   }catch(e){ console.error('Save key display failed:',e); }
 }
 
-// Persist the installer's auto-install-Python choice.
-async function toggleAutoInstallPython(){
-  const on=document.getElementById('autoInstallPythonCheckbox').checked;
-  window.autoInstallPython=on;
+// Check whether a usable Python 3 exists on the system PATH (the one
+// install.command needs), then guide the user to install it only if it's truly
+// missing. The app itself runs on Python, so this usually just confirms what's
+// already installed.
+async function checkPython(){
+  const btn = document.getElementById('installPythonBtn');
+  const hint = document.getElementById('pythonStatusHint');
+  btn.textContent = '… checking'; btn.style.opacity='.6';
+  let data;
   try{
-    await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({auto_install_python:on})});
-  }catch(e){ console.error('Save auto-install python failed:',e); }
+    data = await (await fetch('/api/python-status')).json();
+  }catch(e){
+    btn.textContent='🛠 Install Python…'; btn.style.opacity='1';
+    hint.textContent='⚠ Could not check Python right now.'; hint.style.color='#ff8b8b';
+    return;
+  }
+  btn.textContent='↻ Re-check'; btn.style.opacity='1';
+
+  if(data.found){
+    hint.style.color='';
+    hint.textContent = `✓ Python ${data.found.version} is available (${data.found.cmd}). ` +
+      `This app runs on ${data.running && data.running.version ? 'Python '+data.running.version : 'Python'} — nothing to install.`;
+  } else if(data.brew_available){
+    hint.style.color='#ffb84d';
+    hint.textContent = '⚠ No Python 3 is on your PATH. Since Homebrew is installed, open a terminal and run: ' +
+      '`brew install python@3.11` — then re-check here.';
+  } else {
+    hint.style.color='#ffb84d';
+    hint.textContent = '⚠ No Python 3 is on your PATH. Easiest fix: `brew install python@3.11` or download it from ' +
+      'https://www.python.org/downloads/macos/.';
+  }
 }
 
 // Re-show the first-run welcome guide (clears the dismissed flag + reopens it).
@@ -1783,9 +1826,18 @@ async function loadCrates() {
       <button class="nav-item-del" onclick="event.stopPropagation();deleteCrate(${c.id})" title="Delete">✕</button>
     </div>`).join('');
   populateImportCrateSelect();
+  populateDownloadCrateSelect();
 }
 
 // Keep the folder-import crate dropdown in sync with the crate list
+function populateDownloadCrateSelect() {
+  const sel = document.getElementById('downloadCrateSelect');
+  if (!sel) return;
+  const crates = window._allCrates || [];
+  sel.innerHTML = '<option value="">No crate</option>' +
+    crates.filter(c => !c.is_smart).map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+}
+
 function populateImportCrateSelect() {
   const sel = document.getElementById('importCrateSelect');
   if (!sel) return;
@@ -1865,7 +1917,7 @@ async function startFolderImport() {
 // Finder-style browse + search for the Import Folder tool. All filesystem
 // access happens on the backend; this only renders what /api/folders returns.
 let folderPick = { path: null };
-let folderPickTarget = 'import';   // where the picked folder goes: 'import' | 'export'
+let folderPickTarget = 'import';   // where the picked folder goes: 'import' | 'export' | 'download'
 let folderSearchTimer = null;
 
 function openFolderPicker(target){
@@ -1971,6 +2023,12 @@ function usePickedFolder(){
     document.getElementById('exportPathInput').focus();
     return;
   }
+  if(folderPickTarget==='download'){
+    document.getElementById('folderInput').value = folderPick.path;
+    closeFolderPicker();
+    document.getElementById('folderInput').focus();
+    return;
+  }
   document.getElementById('importFolderPath').value = folderPick.path;
   closeFolderPicker();
   document.getElementById('importFolderPath').focus();
@@ -2024,6 +2082,25 @@ async function deleteFolder(name){
 // Sends this crate's current song list to the backend, which writes it
 // directly into Mixxx's own database as a real crate. Mixxx must be closed
 // for this to work safely -- the backend checks and refuses otherwise.
+async function syncMixxxPlayCounts(){
+  const resp=await fetch('/api/sync/mixxx-play-counts',{method:'POST'});
+  const data=await resp.json();
+  if(data.ok){
+    await loadSongs(currentCrate);
+    alert(`Imported play counts for ${data.tracks_read} Mixxx tracks.`);
+  }else alert('Play-count sync failed: '+(data.error||'unknown error'));
+}
+
+async function markSongPlayed(songId){
+  const resp=await fetch(`/api/songs/${songId}/played`,{method:'POST'});
+  const data=await resp.json();
+  if(!data.error){
+    const song=allSongs.find(s=>s.id===songId);
+    if(song) song.play_count=data.play_count;
+    applyFilters();
+  }
+}
+
 async function syncCrateToMixxx(crateId) {
   const btn = document.getElementById(`sync-btn-${crateId}`);
   const originalText = btn.textContent;
@@ -2138,6 +2215,8 @@ function addRule() {
       <option value="duration_seconds">Duration (sec)</option>
       <option value="artist">Artist</option>
       <option value="year">Year</option>
+      <option value="play_count">Play count</option>
+      <option value="least_played">Least played</option>
     </select>
     <select class="rule-sel" id="ro-${id}">
       <option value="gte">≥</option>
@@ -2153,7 +2232,7 @@ function addRule() {
 function updateRuleOps(id) {
   const field=document.getElementById(`rf-${id}`).value;
   const opSel=document.getElementById(`ro-${id}`);
-  if(['bpm','duration_seconds'].includes(field)){
+  if(['bpm','duration_seconds','play_count'].includes(field)){
     opSel.innerHTML='<option value="gte">≥</option><option value="lte">≤</option><option value="eq">=</option>';
   } else {
     opSel.innerHTML='<option value="contains">contains</option><option value="eq">=</option>';
@@ -2300,9 +2379,10 @@ function applyFilters(){
   let songs=getFiltered();
   const {field,asc}=currentSort;
   songs.sort((a,b)=>{
-    let va=a[field],vb=b[field];
+    const sortField=field==='least_played'?'play_count':field;
+    let va=a[sortField]??0,vb=b[sortField]??0;
     if(va==null) return 1;if(vb==null) return -1;
-    if(field==='musical_key'){              // sort by wheel position, not raw string
+    if(sortField==='musical_key'){              // sort by wheel position, not raw string
       va=camelotNum(va)??va;vb=camelotNum(vb)??vb;
     }
     if(typeof va==='string') va=va.toLowerCase();
@@ -2338,6 +2418,8 @@ function cellForColumn(key, s, v) {
       return `<div class="sdur" data-colkey="duration_seconds">${v.dur}</div>`;
     case 'file_size_bytes':
       return `<div class="sdur" data-colkey="file_size_bytes" style="color:var(--muted)">${v.size}</div>`;
+    case 'play_count':
+      return `<div class="sdur" data-colkey="play_count" style="color:var(--purple)">${s.play_count||0}</div>`;
   }
   return '';
 }
@@ -2370,6 +2452,7 @@ function renderSongs(songs){
         <div class="si2">${i+1}</div>
         ${dataCells}
         <div class="row-acts" onclick="event.stopPropagation()">
+          <button class="show-btn" onclick="markSongPlayed(${s.id})" title="Increase play count">+1</button>
           <button class="show-btn" onclick="revealInFinder('${fp.replace(/'/g,"\\'")}')">Show</button>
           <button class="del-btn" onclick="deleteSong(${s.id},'${title}')">✕</button>
         </div>
@@ -2724,6 +2807,10 @@ async function openAddTransitionModal(sourceId){
       <input class="ii" id="atNotes" placeholder="Notes — technique, timing…" style="flex:1">
       <input class="ii" id="atTag" placeholder="Tag (e.g. energy +1)" style="width:140px">
     </div>
+    <label style="margin-top:10px;display:flex;align-items:center;gap:7px;cursor:pointer;color:var(--text2);font-size:11.5px">
+      <input type="checkbox" id="atToTry">
+      Mark as “to try” — queue this mix for a live test before trusting it
+    </label>
     <div style="margin-top:14px;display:flex;gap:8px;justify-content:flex-end">
       <button class="btn-ghost" style="width:auto;margin:0" onclick="closeAddTransitionModal()">Cancel</button>
       <button class="btn-save" onclick="confirmAddTransition()">Add Transition</button>
@@ -2780,12 +2867,15 @@ async function confirmAddTransition(){
   if(!toSong&&!toText){ alert('Pick a target song or enter a track name.'); return; }
   const notes=document.getElementById('atNotes')?.value.trim();
   const tag=document.getElementById('atTag')?.value.trim();
+  const toTry=document.getElementById('atToTry')?.checked||false;
   const resp=await fetch(`/api/songs/${pendingTransitionFromId}/transitions`,{method:'POST',
     headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({to_song_id:toSong||undefined,to_text:toText||undefined,notes,tag})});
+    body:JSON.stringify({to_song_id:toSong||undefined,to_text:toText||undefined,notes,tag,
+      status:toTry?'to_try':'confirmed'})});
   const data=await resp.json();
   if(data.error){ alert(data.error); return; }
   closeAddTransitionModal();
+  refreshTransTryBadge();
   if(currentSong && document.getElementById('infoModal').classList.contains('open'))
     renderTransitionsSection(currentSong.id);
   if(document.getElementById('tab-transitions').classList.contains('active')) renderTransitionTab();
@@ -2849,6 +2939,8 @@ function exportCrateXml(id){ downloadBlob('/api/export/rekordbox-xml?crate_id='+
 
 // -- TRANSITIONS SIDEBAR TAB -------------------------------------------------
 // All links grouped by source song, newest first, with jump-to-song and delete.
+// Two sections: confirmed transitions, then "transitions to try" (status='to_try')
+// — untested mixes awaiting a live check, each with a ✓ commit button.
 async function renderTransitionTab(){
   const list=document.getElementById('transitionList');
   if(!list) return;
@@ -2856,13 +2948,14 @@ async function renderTransitionTab(){
   try{
     transitions=await (await fetch('/api/transitions')).json();
   }catch(e){ list.innerHTML='<div class="ts-empty" style="padding:10px 6px">Could not load transitions.</div>'; return; }
+  updateTransTryBadge(transitions);
+  const toTry=transitions.filter(t=>t.status==='to_try');
+  const confirmed=transitions.filter(t=>t.status!=='to_try');
   if(!transitions.length){
     list.innerHTML='<div class="ts-empty" style="padding:10px 6px">No transitions yet. Right-click a song in the library → Transitions → “+ Add”.</div>';
     return;
   }
-  const groups={};
-  transitions.forEach(t=>{ (groups[t.from_song_id]=groups[t.from_song_id]||[]).push(t); });
-  list.innerHTML=Object.entries(groups).map(([sid,ts])=>{ const src=ts[0]; return `
+  const renderGroup=(entries)=>Object.entries(entries).map(([sid,ts])=>{ const src=ts[0]; return `
     <div class="ts-tab-group">
       <div class="ts-tab-src" title="Jump to this song" onclick="jumpToSong(${sid})">
         <span class="nav-item-label">${esc(src.from_title||src.from_filename||'?')} — ${esc(src.from_artist||'?')}</span>
@@ -2874,12 +2967,50 @@ async function renderTransitionTab(){
           : `<span class="ts-tab-target noclick" title="Not in your library">${esc(t.to_text||'Untitled track')}</span>`;
         return `<div class="ts-tab-row"><span class="ts-arrow">→</span>${target}
           ${t.tag?`<span class="ts-tag">${esc(t.tag)}</span>`:''}
+          ${t.status==='to_try'?`<button class="ts-act" title="Commit — mark this transition as tested and working" onclick="confirmTransition(${t.id})">✓</button>`:''}
           <button class="nav-item-del" title="Delete transition" onclick="deleteTransition(${t.id})">✕</button>
         </div>`;
       }).join('')}
     </div>`;
   }).join('');
+  const toTryHtml = toTry.length
+    ? renderGroup(Object.entries(toTry).reduce((g,t)=>{ (g[t.from_song_id]=g[t.from_song_id]||[]).push(t); return g; },{}))
+    : '<div class="ts-empty" style="padding:4px 6px">Nothing queued — add a transition with “Mark as to-try”.</div>';
+  const confirmedHtml = confirmed.length
+    ? renderGroup(Object.entries(confirmed).reduce((g,t)=>{ (g[t.from_song_id]=g[t.from_song_id]||[]).push(t); return g; },{}))
+    : '<div class="ts-empty" style="padding:4px 6px">No confirmed transitions yet.</div>';
+  list.innerHTML=`
+    <div class="ts-group-label" style="padding:6px 6px 2px">🧪 Transitions to try (${toTry.length})</div>
+    ${toTryHtml}
+    <div class="ts-group-label" style="padding:10px 6px 2px">✓ Confirmed transitions (${confirmed.length})</div>
+    ${confirmedHtml}`;
 }
+
+// Header badge: show the to-try count whenever it is non-zero.
+function updateTransTryBadge(transitions){
+  const btn=document.getElementById('transTryBtn');
+  if(!btn) return;
+  const n=(transitions||[]).filter(t=>t.status==='to_try').length;
+  btn.style.display=n>0?'':'none';
+  const count=document.getElementById('transTryCount');
+  if(count) count.textContent=String(n);
+}
+
+// Standalone refresh so the header badge stays current without opening the tab.
+async function refreshTransTryBadge(){
+  try{ updateTransTryBadge(await (await fetch('/api/transitions')).json()); }catch(e){}
+}
+
+// Commit a to-try transition: “tested, it works”.
+async function confirmTransition(id){
+  const resp=await fetch(`/api/transitions/${id}/confirm`,{method:'POST'});
+  const data=await resp.json();
+  if(data.error){ alert(data.error); return; }
+  refreshTransTryBadge();
+  if(currentSong) renderTransitionsSection(currentSong.id);
+  renderTransitionTab();
+}
+
 
 // Jump to a song in the library and pulse-highlight its row
 async function jumpToSong(id){
@@ -2903,6 +3034,7 @@ async function jumpToSong(id){
 async function startDownload(){
   const query=document.getElementById('downloadInput').value.trim();
   const subfolder=document.getElementById('folderInput').value.trim()||null;
+  const crateId=document.getElementById('downloadCrateSelect').value||null;
   if(!query) return;
 
   const lines = query.split('\n').filter(l => l.trim());
@@ -2913,18 +3045,18 @@ async function startDownload(){
     query.startsWith('https://open.spotify.com/');
 
   if(isSpotifyTrackList){
-    await startSpotifyListDownload(lines.map(l=>l.trim()), subfolder);
+    await startSpotifyListDownload(lines.map(l=>l.trim()), subfolder, crateId);
     return;
   }
 
   if(isMultiLine && !isSpotifyLink){
-    await startBatchDownload(query, subfolder, lines.length);
+    await startBatchDownload(query, subfolder, lines.length, crateId);
     return;
   }
 
   setStatus('downloading','Starting…');
   const resp=await fetch('/api/download',{method:'POST',
-    headers:{'Content-Type':'application/json'},body:JSON.stringify({query,subfolder})});
+    headers:{'Content-Type':'application/json'},body:JSON.stringify({query,subfolder,crate_id:crateId})});
   const data=await resp.json();
 
   if(data.status==='failed'){
@@ -2959,13 +3091,13 @@ async function startDownload(){
   }
 }
 
-async function startSpotifyListDownload(urls, subfolder){
+async function startSpotifyListDownload(urls, subfolder, crateId){
   setStatus('downloading', `Queuing ${urls.length} Spotify tracks…`);
 
   const resp = await fetch('/api/download-spotify-list', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ urls, subfolder })
+    body: JSON.stringify({ urls, subfolder, crate_id: crateId })
   });
   const data = await resp.json();
 
@@ -2992,12 +3124,12 @@ async function startSpotifyListDownload(urls, subfolder){
   }, 10000);
 }
 
-async function startBatchDownload(text, subfolder, lineCount){
+async function startBatchDownload(text, subfolder, lineCount, crateId){
   setStatus('downloading',`Parsing ${lineCount} tracks…`);
 
   const resp = await fetch('/api/download-list',{method:'POST',
     headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({text, subfolder})});
+    body:JSON.stringify({text, subfolder, crate_id: crateId})});
   const data = await resp.json();
 
   if(data.error){

@@ -48,6 +48,7 @@ DJS_SOFTWARE = _config.get("djs_software", "")
 # Whether newly-added songs are auto-pushed into Mixxx's library (Settings
 # tab toggle; default on).
 AUTO_SYNC_MIXXX = bool(_config.get("auto_sync_mixxx", True))
+AUTO_SYNC_MIXXX_PLAYS = bool(_config.get("auto_sync_mixxx_plays", True))
 # How musical keys are shown: "camelot" wheel (1A/3B) or "notation"
 # (Am/Bbm). Display-only -- stored keys are never rewritten.
 KEY_DISPLAY = _config.get("key_display", "camelot")
@@ -62,6 +63,7 @@ def _config_dict():
             'rekordbox_export_path': REKORDBOX_EXPORT_PATH,
             'djs_software': DJS_SOFTWARE,
             'auto_sync_mixxx': AUTO_SYNC_MIXXX,
+            'auto_sync_mixxx_plays': AUTO_SYNC_MIXXX_PLAYS,
             'key_display': KEY_DISPLAY,
             'auto_install_python': AUTO_INSTALL_PYTHON}
 
@@ -70,7 +72,7 @@ def _save_config(updates):
     """Merges `updates` into config.json (preserving existing keys, including
     the Spotify secrets) and refreshes the affected module-level settings.
     Only settings that can change at runtime are updated here."""
-    global _config, REKORDBOX_EXPORT_PATH, DJS_SOFTWARE, AUTO_SYNC_MIXXX, KEY_DISPLAY, AUTO_INSTALL_PYTHON
+    global _config, REKORDBOX_EXPORT_PATH, DJS_SOFTWARE, AUTO_SYNC_MIXXX, AUTO_SYNC_MIXXX_PLAYS, KEY_DISPLAY, AUTO_INSTALL_PYTHON
     path = os.path.expanduser("~/.dj-library/config.json")
     data = dict(_config)
     data.update(updates)
@@ -83,6 +85,8 @@ def _save_config(updates):
         DJS_SOFTWARE = updates['djs_software']
     if 'auto_sync_mixxx' in updates:
         AUTO_SYNC_MIXXX = bool(updates['auto_sync_mixxx'])
+    if 'auto_sync_mixxx_plays' in updates:
+        AUTO_SYNC_MIXXX_PLAYS = bool(updates['auto_sync_mixxx_plays'])
     if 'key_display' in updates:
         KEY_DISPLAY = updates['key_display']
     if 'auto_install_python' in updates:
@@ -104,6 +108,7 @@ def init_db():
             title TEXT, artist TEXT, album TEXT, year TEXT, genre TEXT,
             duration_seconds REAL, file_size_bytes INTEGER,
             bpm REAL, musical_key TEXT,
+            play_count INTEGER DEFAULT 0,
             file_hash TEXT, spotify_id TEXT,
             added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )''')
@@ -129,15 +134,24 @@ def init_db():
             to_text TEXT,
             notes TEXT,
             tag TEXT,
+            status TEXT DEFAULT 'confirmed',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )''')
         db.commit()
         for col in ['album TEXT','year TEXT','genre TEXT','file_size_bytes INTEGER',
-                    'bpm REAL','musical_key TEXT']:
+                    'bpm REAL','musical_key TEXT','play_count INTEGER DEFAULT 0']:
             try:
                 db.execute(f'ALTER TABLE songs ADD COLUMN {col}')
                 db.commit()
             except: pass
+        # Migration for DBs created before the 'status' column existed:
+        # add the column, then backfill pre-existing rows as 'confirmed'.
+        try:
+            db.execute("ALTER TABLE transitions ADD COLUMN status TEXT DEFAULT 'confirmed'")
+            db.commit()
+            db.execute("UPDATE transitions SET status='confirmed' WHERE status IS NULL")
+            db.commit()
+        except: pass
 
 # -- FILE UTILS --------------------------------------------------------------
 
@@ -675,7 +689,7 @@ def refresh_ytdlp():
         _log(f"YT-DLP: startup refresh failed: {e}")
 
 def do_download(query, spotify_id=None, title=None, artist=None,
-                album=None, year=None, subfolder=None):
+                album=None, year=None, subfolder=None, crate_id=None):
     output_dir = os.path.join(MUSIC_DIR, subfolder) if subfolder else MUSIC_DIR
     os.makedirs(output_dir, exist_ok=True)
     job_id = spotify_id or hashlib.md5(query.encode()).hexdigest()[:16]
@@ -722,6 +736,12 @@ def do_download(query, spotify_id=None, title=None, artist=None,
             write_metadata(downloaded_path, title=title, artist=artist,
                           album=album, year=year)
             if add_file_to_db(downloaded_path):
+                if crate_id:
+                    with get_db() as db:
+                        db.execute('INSERT OR IGNORE INTO crate_songs (crate_id, song_id) '
+                                   'SELECT ?, id FROM songs WHERE filepath=?',
+                                   (crate_id, downloaded_path))
+                        db.commit()
                 # Newly downloaded song -- push it into Mixxx in the background.
                 auto_sync_new_songs([downloaded_path])
                 queue_auto_export()
@@ -790,12 +810,15 @@ def evaluate_smart_crate(rules):
         field = r.get('field')
         op    = r.get('op')
         val   = r.get('value')
-        if field not in ('bpm','duration_seconds','genre','musical_key','artist','title','year'): continue
-        if op == 'gte':      conditions.append(f'{field} >= ?'); params.append(val)
-        elif op == 'lte':    conditions.append(f'{field} <= ?'); params.append(val)
+        if field not in ('bpm','duration_seconds','genre','musical_key','artist','title','year','play_count'): continue
+        if op == 'gte':      conditions.append(f'COALESCE({field}, 0) >= ?'); params.append(val)
+        elif op == 'lte':    conditions.append(f'COALESCE({field}, 0) <= ?'); params.append(val)
         elif op == 'eq':     conditions.append(f'{field} = ?');  params.append(val)
         elif op == 'contains':
             conditions.append(f'{field} LIKE ?'); params.append(f'%{val}%')
+        elif op == 'gt':     conditions.append(f'COALESCE({field}, 0) > ?'); params.append(val)
+        elif op == 'lt':     conditions.append(f'COALESCE({field}, 0) < ?'); params.append(val)
+        elif op == 'least_played': conditions.append('COALESCE(play_count, 0) <= ?'); params.append(val)
     if not conditions: return []
     where = ' AND '.join(conditions)
     with get_db() as db:
@@ -1007,6 +1030,10 @@ def sync_transitions_to_mixxx():
             return {'ok': False, 'error': "This Mixxx database has no comment column."}
 
         # Gather our songs' outgoing transitions (with target names) by song.
+        # Transitions marked 'to_try' are HELD BACK: untested mixes never reach
+        # Mixxx until they are confirmed. A song whose transitions are all
+        # to_try is treated as having none here, so the cleanup pass below
+        # strips any stale section from its Mixxx comment.
         with get_db() as db:
             rows = db.execute('''SELECT t.from_song_id, t.to_song_id, t.to_text, t.notes, t.tag,
                     s.filepath,
@@ -1014,6 +1041,7 @@ def sync_transitions_to_mixxx():
                 FROM transitions t
                 JOIN songs s ON s.id = t.from_song_id
                 LEFT JOIN songs ts ON ts.id = t.to_song_id
+                WHERE t.status = 'confirmed'
                 ORDER BY t.from_song_id, t.id''').fetchall()
         by_song = {}
         for r in rows:
@@ -1071,6 +1099,36 @@ def sync_transitions_to_mixxx():
 # never want to create duplicate rows). Same safety rules as every other Mixxx
 # write: refuse while Mixxx is open, back up the DB before writing, restore it
 # on any failure.
+
+def sync_play_counts_from_mixxx():
+    """Imports Mixxx's cumulative play counts without modifying its database.
+    Mixxx stores the count on library.played; some versions use date_played as
+    well, but played is the stable cumulative field."""
+    db_path = find_mixxx_db()
+    if not db_path:
+        return {'ok': False, 'error': "Could not find Mixxx's database. Open Mixxx at least once first."}
+    try:
+        conn = sqlite3.connect(db_path, timeout=2)
+        conn.row_factory = sqlite3.Row
+        cols = {r[1] for r in conn.execute('PRAGMA table_info(library)').fetchall()}
+        if 'played' not in cols:
+            conn.close()
+            return {'ok': False, 'error': "This Mixxx database does not expose play counts."}
+        rows = conn.execute("""SELECT tl.location, COALESCE(l.played, 0) AS played
+            FROM library l JOIN track_locations tl ON l.location=tl.id
+            WHERE tl.location IS NOT NULL""").fetchall()
+        conn.close()
+        updated = 0
+        with get_db() as db:
+            for row in rows:
+                cur = db.execute('UPDATE songs SET play_count=? WHERE filepath=? AND play_count<>?',
+                                 (int(row['played'] or 0), row['location'], int(row['played'] or 0)))
+                updated += cur.rowcount
+            db.commit()
+        return {'ok': True, 'updated': updated, 'tracks_read': len(rows)}
+    except Exception as e:
+        return {'ok': False, 'error': _mixxx_error_hint(e) + str(e)}
+
 
 def sync_new_songs_to_mixxx(filepaths):
     """Inserts DJ Library songs that Mixxx doesn't know yet into Mixxx's
@@ -1175,13 +1233,15 @@ def auto_sync_new_songs(filepaths):
 
 def outgoing_transitions_for(song_id):
     """One song's outgoing transitions with target names resolved, in the same
-    order the Mixxx comment and ID3 tag render them."""
+    order the Mixxx comment and ID3 tag render them. Transitions marked
+    'to_try' are held back -- untested mixes stay out of Mixxx comments,
+    file ID3 tags and the rekordbox export until they are confirmed."""
     with get_db() as db:
         rows = db.execute('''SELECT t.id, t.to_song_id, t.to_text, t.notes, t.tag,
                 ts.title AS to_title, ts.artist AS to_artist, ts.filename AS to_filename
             FROM transitions t
             LEFT JOIN songs ts ON ts.id = t.to_song_id
-            WHERE t.from_song_id = ?
+            WHERE t.from_song_id = ? AND t.status = 'confirmed'
             ORDER BY t.created_at, t.id''', (song_id,)).fetchall()
     return [dict(r) for r in rows]
 
@@ -1305,6 +1365,8 @@ def update_config():
         updates['rekordbox_export_path'] = p
     if 'auto_sync_mixxx' in data:
         updates['auto_sync_mixxx'] = bool(data['auto_sync_mixxx'])
+    if 'auto_sync_mixxx_plays' in data:
+        updates['auto_sync_mixxx_plays'] = bool(data['auto_sync_mixxx_plays'])
     if 'key_display' in data:
         kd = str(data['key_display']).strip()
         if kd not in ('camelot', 'notation'):
@@ -1322,6 +1384,7 @@ def update_config():
 
 @app.route('/api/songs')
 def get_songs():
+    maybe_sync_mixxx_play_counts()
     q = request.args.get('q','')
     with get_db() as db:
         if q:
@@ -1331,6 +1394,46 @@ def get_songs():
         else:
             rows = db.execute('SELECT * FROM songs ORDER BY artist,title').fetchall()
     return jsonify([dict(r) for r in rows])
+
+@app.route('/api/sync/mixxx-play-counts', methods=['POST'])
+def sync_mixxx_play_counts():
+    return jsonify(sync_play_counts_from_mixxx())
+
+_PLAY_SYNC_LOCK = threading.Lock()
+_last_play_sync = 0
+
+def maybe_sync_mixxx_play_counts():
+    """Activity-triggered, throttled read-only Mixxx sync. It never touches the
+    Mixxx database while Mixxx is running and runs at most once per interval."""
+    global _last_play_sync
+    if not AUTO_SYNC_MIXXX_PLAYS or is_mixxx_running():
+        return
+    import time
+    if time.time() - _last_play_sync < 60:
+        return
+    if not _PLAY_SYNC_LOCK.acquire(blocking=False):
+        return
+    _last_play_sync = time.time()
+    def work():
+        try:
+            result = sync_play_counts_from_mixxx()
+            if result.get('ok') and result.get('updated'):
+                print(f"Auto Mixxx play sync: {result['updated']} track(s) updated", flush=True)
+        finally:
+            _PLAY_SYNC_LOCK.release()
+    threading.Thread(target=work, daemon=True).start()
+
+@app.route('/api/songs/<int:song_id>/played', methods=['POST'])
+def mark_song_played(song_id):
+    """Records one play for a song; smart crates can use this for rankings."""
+    with get_db() as db:
+        row = db.execute('SELECT id FROM songs WHERE id=?', (song_id,)).fetchone()
+        if not row:
+            return jsonify({'error': 'not found'}), 404
+        db.execute('UPDATE songs SET play_count=COALESCE(play_count, 0)+1 WHERE id=?', (song_id,))
+        db.commit()
+        count = db.execute('SELECT play_count FROM songs WHERE id=?', (song_id,)).fetchone()['play_count']
+    return jsonify({'ok': True, 'play_count': count})
 
 @app.route('/api/songs/<int:song_id>', methods=['PATCH'])
 def update_song(song_id):
@@ -1722,6 +1825,7 @@ def download_spotify_list():
     data = request.json
     urls = data.get('urls', [])
     subfolder = data.get('subfolder')
+    crate_id = data.get('crate_id')
 
     if not urls:
         return jsonify({'error': 'No URLs provided'}), 400
@@ -1762,7 +1866,8 @@ def download_spotify_list():
                 artist=info['artist'],
                 album=info.get('album'),
                 year=info.get('year'),
-                subfolder=subfolder
+                subfolder=subfolder,
+                crate_id=crate_id
             )
             result = download_status.get(job_id, {})
             if result.get('status') == 'failed':
@@ -1791,6 +1896,7 @@ def download_list():
     data = request.json
     text = data.get('text', '').strip()
     subfolder = data.get('subfolder')
+    crate_id = data.get('crate_id')
 
     if not text:
         return jsonify({'error': 'No text provided'}), 400
@@ -1829,7 +1935,7 @@ def download_list():
 
     def download_batch():
         for query in tracks:
-            do_download(query, subfolder=subfolder)
+            do_download(query, subfolder=subfolder, crate_id=crate_id)
             st = download_status[batch_id]
             job_id = hashlib.md5(query.encode()).hexdigest()[:16]
             result = download_status.get(job_id, {})
@@ -1861,6 +1967,7 @@ def download():
     data     = request.json
     query    = data.get('query','')
     subfolder = data.get('subfolder')
+    crate_id = data.get('crate_id')
 
     if 'open.spotify.com/track/' in query:
         info = get_track_info(query)
@@ -1868,7 +1975,7 @@ def download():
             download_status[info['id']] = {'status':'downloading','query':query}
             threading.Thread(target=do_download, args=[
                 f"{info['artist']} {info['title']}", info['id'],
-                info['title'], info['artist'], info.get('album'), info.get('year'), subfolder
+                info['title'], info['artist'], info.get('album'), info.get('year'), subfolder, crate_id
             ]).start()
             return jsonify({'status':'queued','track':info})
         return jsonify({'status':'failed','error':'Could not fetch Spotify info'})
@@ -1884,8 +1991,8 @@ def download():
                 (already_have if ex else missing).append(t)
         def dl_playlist():
             for t in missing:
-                do_download(f"{t['artist']} {t['title']}", t['id'],
-                    t['title'], t['artist'], t.get('album'), t.get('year'), subfolder)
+                do_download(            f"{t['artist']} {t['title']}", t['id'],
+                    t['title'], t['artist'], t.get('album'), t.get('year'), subfolder, crate_id)
         threading.Thread(target=dl_playlist).start()
         return jsonify({
             'status':'queued',
@@ -1898,7 +2005,7 @@ def download():
     else:
         job_id = hashlib.md5(query.encode()).hexdigest()[:16]
         download_status[job_id] = {'status':'downloading','query':query}
-        threading.Thread(target=do_download, args=[query,None,None,None,None,None,subfolder]).start()
+        threading.Thread(target=do_download, args=[query,None,None,None,None,None,subfolder,crate_id]).start()
         return jsonify({'status':'queued','query':query,'job_id':job_id})
 
 @app.route('/api/download-status/<path:job_id>')
@@ -2151,6 +2258,40 @@ def trigger_bpm_analysis():
         total = db.execute('SELECT COUNT(*) FROM songs WHERE bpm IS NULL').fetchone()[0]
     return jsonify({'status':'started','songs_to_analyze':total})
 
+@app.route('/api/python-status')
+def python_status():
+    """Report whether a usable Python 3 is available on the system PATH (what
+    install.command looks for) versus only the interpreter this app happens to
+    be running under. Lets the Settings 'Install Python' button show the real
+    status."""
+    found = None
+    for c in ['python3.13','python3.12','python3.11','python3']:
+        try:
+            out = subprocess.run([c,'-c',"import sys;raise SystemExit(0 if sys.version_info>=(3,9) else 1)"],
+                                 capture_output=True, text=True)
+            if out.returncode == 0:
+                vs = subprocess.run([c,'-c','import sys;print(sys.version.split()[0])'],
+                                    capture_output=True, text=True)
+                found = {'cmd': c, 'version': vs.stdout.strip()}
+                break
+        except (FileNotFoundError, OSError):
+            continue
+
+    brew = False
+    try:
+        brew = subprocess.run(['brew','--version'], capture_output=True, text=True).returncode == 0
+    except (FileNotFoundError, OSError):
+        pass
+
+    running = None
+    try:
+        import platform as _p
+        running = {'path': sys.executable, 'version': _p.python_version()}
+    except Exception:
+        pass
+
+    return jsonify({'found': found, 'brew_available': brew, 'running': running})
+
 @app.route('/api/genres')
 def get_genres():
     with get_db() as db:
@@ -2299,14 +2440,14 @@ def get_transitions(song_id):
     with get_db() as db:
         if not db.execute('SELECT id FROM songs WHERE id=?', (song_id,)).fetchone():
             return jsonify({'error': 'Song not found'}), 404
-        outgoing = db.execute('''SELECT t.id, t.to_song_id, t.to_text, t.notes, t.tag,
+        outgoing = db.execute('''SELECT t.id, t.to_song_id, t.to_text, t.notes, t.tag, t.status,
                 s.title AS to_title, s.artist AS to_artist,
                 s.filename AS to_filename, s.bpm AS to_bpm, s.musical_key AS to_key
             FROM transitions t
             LEFT JOIN songs s ON s.id = t.to_song_id
             WHERE t.from_song_id = ?
             ORDER BY t.created_at, t.id''', (song_id,)).fetchall()
-        incoming = db.execute('''SELECT t.id, t.from_song_id, t.notes, t.tag,
+        incoming = db.execute('''SELECT t.id, t.from_song_id, t.notes, t.tag, t.status,
                 s.title AS from_title, s.artist AS from_artist, s.filename AS from_filename
             FROM transitions t
             JOIN songs s ON s.id = t.from_song_id
@@ -2324,6 +2465,9 @@ def add_transition(song_id):
     to_text = (data.get('to_text') or '').strip()
     notes = (data.get('notes') or '').strip()
     tag = (data.get('tag') or '').strip()
+    status = (data.get('status') or 'confirmed').strip()
+    if status not in ('confirmed', 'to_try'):
+        status = 'confirmed'
 
     if to_song_id is not None and to_text:
         return jsonify({'error': 'Pick either a library song OR a text target, not both'}), 400
@@ -2343,8 +2487,8 @@ def add_transition(song_id):
                 return jsonify({'error': 'A song cannot transition into itself'}), 400
             if not db.execute('SELECT id FROM songs WHERE id=?', (to_song_id,)).fetchone():
                 return jsonify({'error': 'Target song not found'}), 404
-        db.execute('''INSERT INTO transitions (from_song_id, to_song_id, to_text, notes, tag)
-            VALUES (?, ?, ?, ?, ?)''', (song_id, to_song_id, to_text or None, notes or None, tag or None))
+        db.execute('''INSERT INTO transitions (from_song_id, to_song_id, to_text, notes, tag, status)
+            VALUES (?, ?, ?, ?, ?, ?)''', (song_id, to_song_id, to_text or None, notes or None, tag or None, status))
         db.commit()
         tid = db.execute('SELECT last_insert_rowid()').fetchone()[0]
     sync_transitions_after_change(song_id)
@@ -2355,7 +2499,7 @@ def list_transitions():
     """Every transition in the library with source and target info joined in,
     newest first -- used by the Transitions sidebar tab."""
     with get_db() as db:
-        rows = db.execute('''SELECT t.id, t.from_song_id, t.to_song_id, t.to_text, t.notes, t.tag,
+        rows = db.execute('''SELECT t.id, t.from_song_id, t.to_song_id, t.to_text, t.notes, t.tag, t.status,
                 fs.title AS from_title, fs.artist AS from_artist, fs.filename AS from_filename,
                 ts.title AS to_title, ts.artist AS to_artist, ts.filename AS to_filename
             FROM transitions t
@@ -2378,6 +2522,9 @@ def update_transition(tid):
         if 'tag' in data:
             db.execute('UPDATE transitions SET tag=? WHERE id=?',
                 ((data.get('tag') or '').strip() or None, tid))
+        if 'status' in data and data.get('status') in ('confirmed', 'to_try'):
+            db.execute('UPDATE transitions SET status=? WHERE id=?',
+                (data['status'], tid))
         db.commit()
         from_song_id = row['from_song_id']
     sync_transitions_after_change(from_song_id)
@@ -2402,6 +2549,33 @@ def sync_transitions_mixxx():
     """Writes outgoing transition notes into Mixxx track comments."""
     with _MIXXX_SYNC_LOCK:
         return jsonify(sync_transitions_to_mixxx())
+
+@app.route('/api/transitions/to-try')
+def list_transitions_to_try():
+    """All transitions marked as 'to_try' (untested), newest first."""
+    with get_db() as db:
+        rows = db.execute('''SELECT t.id, t.from_song_id, t.to_song_id, t.to_text, t.notes, t.tag, t.status,
+                fs.title AS from_title, fs.artist AS from_artist, fs.filename AS from_filename,
+                ts.title AS to_title, ts.artist AS to_artist, ts.filename AS to_filename
+            FROM transitions t
+            JOIN songs fs ON fs.id = t.from_song_id
+            LEFT JOIN songs ts ON ts.id = t.to_song_id
+            WHERE t.status = 'to_try'
+            ORDER BY t.created_at DESC, t.id DESC''').fetchall()
+    return jsonify([dict(r) for r in rows])
+
+@app.route('/api/transitions/<int:tid>/confirm', methods=['POST'])
+def confirm_transition(tid):
+    """Marks a 'to_try' transition as confirmed (tested and working)."""
+    with get_db() as db:
+        row = db.execute('SELECT from_song_id FROM transitions WHERE id=?', (tid,)).fetchone()
+        if not row:
+            return jsonify({'error': 'Transition not found'}), 404
+        db.execute("UPDATE transitions SET status='confirmed' WHERE id=?", (tid,))
+        db.commit()
+        from_song_id = row['from_song_id']
+    sync_transitions_after_change(from_song_id)
+    return jsonify({'ok': True})
 
 
 @app.route('/api/transitions/export')

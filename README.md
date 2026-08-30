@@ -6,6 +6,10 @@ your DJ software — Mixxx, Rekordbox, Serato DJ Pro, DJUCED or Engine DJ.
 Built as a single Flask backend with a vanilla JS frontend — no Node, no build
 step, no database server (SQLite).
 
+## Download destinations
+
+The Download panel includes a crate selector beside the folder destination. Choose a manual crate before clicking GET to add newly downloaded songs to that crate. This applies to single tracks, pasted lists, Spotify track lists, and playlists. Smart crates are not selectable because their membership is calculated from rules.
+
 ## Features
 
 - **Library** — scan, browse, search, filter and sort your music folder; BPM
@@ -15,8 +19,8 @@ step, no database server (SQLite).
   are downloaded via `yt-dlp`, converted to MP3 with ffmpeg, tagged, and
   analyzed. `yt-dlp` is bootstrapped and self-updated by the app, so YouTube
   breaking old builds heals itself.
-- **Crates** — manual folders plus smart crates (rules on BPM, key, genre, …);
-  one-click sync of a crate into Mixxx.
+- **Crates** — manual folders plus smart crates (rules on BPM, key, genre, play count, …). Use the **Most played** rule after importing Mixxx play counts or pressing a song’s `+1` button;
+  one-click sync of a crate into Mixxx. Mixxx play counts can be imported from Settings without changing Mixxx’s database.
 - **Duplicates** — same-name / same-song detection that understands Finder's
   `(1)` suffixes, with a manual merge tool for anything the scan misses.
 - **Transitions** — link songs together as "mix A into B" notes (or text-only
@@ -252,7 +256,10 @@ for the values below.
 | `rekordbox_export_path` | Where the always-current `rekordbox.xml` is written (changeable in ⚙ Settings) |
 | `djs_software` | Your DJ software: `mixxx`, `rekordbox`, `serato`, `djuced`, `engine`, `none`, or `""` (not chosen yet) — set from the ⚙ Settings tab |
 | `auto_sync_mixxx` | `true`/`false` — whether new songs are automatically pushed into Mixxx (toggle in ⚙ Settings) |
+| `auto_sync_mixxx_plays` | `true`/`false` — import Mixxx play counts during library activity, throttled to once per minute and only when Mixxx is closed |
 | `key_display` | How keys are shown: `camelot` (1A/3B) or `notation` (Am/Bbm) — display-only, stored keys are untouched (⚙ Settings) |
+
+Smart crates can also use **Most played** (`play_count ≥ N`) or **Least played** (`play_count ≤ N`) rules.
 | `auto_install_python` | `true`/`false` — whether install.command offers to auto-install Python when it's missing (⚙ Settings) |
 
 ## Spotify setup (optional, for the downloader)
