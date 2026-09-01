@@ -11,8 +11,9 @@ import csv
 import html
 import queue
 import urllib.request
+import mimetypes
 from pathlib import Path
-from flask import Flask, jsonify, request, send_from_directory, Response
+from flask import Flask, jsonify, request, send_from_directory, send_file, Response
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 from mutagen.mp3 import MP3
@@ -139,7 +140,8 @@ def init_db():
         )''')
         db.commit()
         for col in ['album TEXT','year TEXT','genre TEXT','file_size_bytes INTEGER',
-                    'bpm REAL','musical_key TEXT','play_count INTEGER DEFAULT 0']:
+                    'bpm REAL','musical_key TEXT','play_count INTEGER DEFAULT 0',
+                    "cleanup_scanned_at TIMESTAMP", "cleanup_decision TEXT"]:
             try:
                 db.execute(f'ALTER TABLE songs ADD COLUMN {col}')
                 db.commit()
@@ -1434,6 +1436,174 @@ def mark_song_played(song_id):
         db.commit()
         count = db.execute('SELECT play_count FROM songs WHERE id=?', (song_id,)).fetchone()['play_count']
     return jsonify({'ok': True, 'play_count': count})
+
+# Browsers can't play every extension DJ software uses; map the ones that work
+# in an <audio> element and fall back to Python's guess for the rest.
+_AUDIO_MIME = {
+    '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.mp4': 'audio/mp4',
+    '.aac': 'audio/aac', '.flac': 'audio/flac', '.wav': 'audio/wav',
+    '.ogg': 'audio/ogg', '.oga': 'audio/ogg', '.opus': 'audio/ogg',
+    '.webm': 'audio/webm',
+}
+
+@app.route('/api/songs/<int:song_id>/audio')
+def stream_song_audio(song_id):
+    """Streams a song's file for in-browser preview. conditional=True lets the
+    <audio> element issue HTTP range requests, so seeking works."""
+    with get_db() as db:
+        row = db.execute('SELECT filepath FROM songs WHERE id=?', (song_id,)).fetchone()
+    if not row:
+        return jsonify({'error': 'not found'}), 404
+    filepath = row['filepath']
+    if not filepath or not os.path.exists(filepath):
+        return jsonify({'error': 'file missing'}), 404
+    ext = os.path.splitext(filepath)[1].lower()
+    mimetype = _AUDIO_MIME.get(ext) or mimetypes.guess_type(filepath)[0] or 'application/octet-stream'
+    return send_file(filepath, mimetype=mimetype, conditional=True)
+
+# -- METADATA CLEANUP ------------------------------------------------------------
+# Downloads arrive with YouTube-scrape tags (missing artists, "... (Official
+# Audio)" titles, empty genres). These endpoints match each track against
+# Spotify's catalogue so the UI can propose proper tags — nothing is written
+# until the user reviews the diff and confirms.
+
+def _norm_text(s):
+    return re.sub(r'[^a-z0-9 ]', '', (s or '').lower())
+
+def _spotify_search_track(title, artist, duration_s=None):
+    """Best Spotify track for a title/artist pair, scored by name similarity
+    and duration proximity. Tries 'title artist' first, then title alone.
+    Returns a proposal dict or None."""
+    token = get_spotify_token()
+    if not token:
+        return None
+    headers = {'Authorization': f'Bearer {token}'}
+    candidates = []
+    for q in (f'{title} {artist}'.strip(), (title or '').strip()):
+        if not q:
+            continue
+        resp = requests.get('https://api.spotify.com/v1/search',
+            params={'q': q, 'type': 'track', 'limit': 10}, headers=headers)
+        if resp.status_code == 200:
+            candidates = resp.json().get('tracks', {}).get('items', [])
+            if candidates:
+                break
+    if not candidates:
+        return None
+    t_norm = _norm_text(title)
+    best, best_score = None, -1
+    for tr in candidates:
+        score = 0
+        if _norm_text(tr.get('name')) == t_norm:
+            score += 2
+        elif t_norm and t_norm in _norm_text(tr.get('name')):
+            score += 1
+        if duration_s:
+            delta = abs(tr.get('duration_ms', 0) / 1000.0 - duration_s)
+            if delta <= 3:   score += 2
+            elif delta <= 8: score += 1
+        if score > best_score:
+            best, best_score = tr, score
+    tr = best
+    dur_delta = abs(tr.get('duration_ms', 0) / 1000.0 - duration_s) if duration_s else 99
+    confidence = 'high' if best_score >= 3 else 'medium' if best_score >= 1 else 'low'
+    return {
+        'spotify_id': tr.get('id'),
+        'artist_id': (tr.get('artists') or [{}])[0].get('id'),
+        'title': tr.get('name'),
+        'artist': ', '.join(a['name'] for a in tr.get('artists', [])),
+        'album': tr.get('album', {}).get('name'),
+        'year': str(tr.get('album', {}).get('release_date', ''))[:4],
+        'confidence': confidence,
+        'duration_delta': round(dur_delta, 1) if duration_s else None,
+    }
+
+def _spotify_artist_genre(artist_id):
+    """A DJ-usable genre string from the artist's Spotify profile, e.g.
+    'Melodic Techno'. Prefers genre words DJ software users recognise."""
+    token = get_spotify_token()
+    if not token or not artist_id:
+        return None
+    resp = requests.get(f'https://api.spotify.com/v1/artists/{artist_id}',
+        headers={'Authorization': f'Bearer {token}'})
+    if resp.status_code != 200:
+        return None
+    genres = resp.json().get('genres', [])
+    if not genres:
+        return None
+    preferred = [g for g in genres if any(
+        w in g for w in ('house','techno','trance','disco','drum and bass','dnb',
+                         'dubstep','funk','edm','downtempo','breakbeat','jungle'))]
+    pick = preferred[0] if preferred else genres[0]
+    return clean_genre(pick.title())
+
+@app.route('/api/cleanup/match/<int:song_id>')
+def cleanup_match(song_id):
+    """Proposes proper tags for one track from Spotify. Read-only."""
+    with get_db() as db:
+        s = db.execute('SELECT * FROM songs WHERE id=?', (song_id,)).fetchone()
+    if not s:
+        return jsonify({'error': 'not found'}), 404
+    title = s['title']
+    artist = s['artist']
+    if not title:
+        # Fall back to the filename the way the scanner reads tags.
+        name = clean_noise(Path(s['filepath']).stem)
+        if ' - ' in name and not artist:
+            artist, title = [p.strip() for p in name.split(' - ', 1)]
+        else:
+            title = name
+    m = _spotify_search_track(title, artist, s['duration_seconds'])
+    if not m:
+        return jsonify({'found': False, 'song_id': song_id})
+    m['genre'] = _spotify_artist_genre(m.pop('artist_id', None))
+    m['song_id'] = song_id
+    return jsonify({'found': True, **m})
+
+@app.route('/api/cleanup/apply/<int:song_id>', methods=['POST'])
+def cleanup_apply(song_id):
+    """Writes reviewed tags to one track's ID3 file tags and DB row."""
+    data = request.json or {}
+    with get_db() as db:
+        row = db.execute('SELECT filepath FROM songs WHERE id=?', (song_id,)).fetchone()
+        if not row:
+            return jsonify({'error': 'not found'}), 404
+        filepath = row['filepath']
+        updates = {k: data[k] for k in ('title','artist','album','year','genre')
+                   if data.get(k)}
+        if updates:
+            sets = ','.join(f'{k}=?' for k in updates)
+            db.execute(f'UPDATE songs SET {sets} WHERE id=?', (*updates.values(), song_id))
+        if data.get('spotify_id'):
+            db.execute('UPDATE songs SET spotify_id=? WHERE id=?', (data['spotify_id'], song_id))
+        # Applying a fix records the decision: future "only never-scanned"
+        # cleanups skip this track, so manual tag edits made afterwards are
+        # never silently overwritten by Spotify data.
+        db.execute('''UPDATE songs SET cleanup_scanned_at=CURRENT_TIMESTAMP,
+            cleanup_decision='applied' WHERE id=?''', (song_id,))
+        db.commit()
+    write_metadata(filepath, **updates)
+    queue_auto_export()
+    return jsonify({'ok': True, 'applied': list(updates)})
+
+@app.route('/api/cleanup/mark-scanned', methods=['POST'])
+def cleanup_mark_scanned():
+    """Records a cleanup decision for tracks that were scanned but not applied:
+    'no_match' (Spotify had nothing) or 'skipped' (the user saw the proposal in
+    the review panel and unchecked it — keep my tags). Lets later "only
+    never-scanned" cleanups skip decided tracks; undecided ones come back."""
+    data = request.json or {}
+    decision = data.get('decision') if data.get('decision') in ('no_match', 'skipped') else 'no_match'
+    ids = [i for i in data.get('ids', []) if isinstance(i, int)]
+    if not ids:
+        return jsonify({'ok': True, 'marked': 0})
+    with get_db() as db:
+        db.executemany(
+            '''UPDATE songs SET cleanup_scanned_at=CURRENT_TIMESTAMP,
+               cleanup_decision=? WHERE id=?''',
+            [(decision, i) for i in ids])
+        db.commit()
+    return jsonify({'ok': True, 'marked': len(ids), 'decision': decision})
 
 @app.route('/api/songs/<int:song_id>', methods=['PATCH'])
 def update_song(song_id):

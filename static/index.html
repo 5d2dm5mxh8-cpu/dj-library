@@ -19,6 +19,18 @@
     try { t = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'; } catch(e) { t = 'dark'; }
   }
   document.documentElement.setAttribute('data-theme', t);
+  // Apply the saved custom accent colour for this theme before first paint.
+  try {
+    var hex = localStorage.getItem(t === 'light' ? 'djlib_accent_light' : 'djlib_accent_dark');
+    if (hex && /^#[0-9a-fA-F]{6}$/.test(hex)) {
+      var r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+      var s = document.documentElement.style;
+      s.setProperty('--cyan', hex);
+      s.setProperty('--cyan-dim', 'rgba('+r+','+g+','+b+',.13)');
+      var lum = (0.299*r + 0.587*g + 0.114*b) / 255;
+      s.setProperty('--on-accent', lum > 0.6 ? '#04121a' : '#ffffff');
+    }
+  } catch(e) {}
 })();
 </script>
 <style>
@@ -215,6 +227,98 @@ header .rule-sel:focus{border-color:var(--cyan);box-shadow:0 0 0 3px var(--cyan-
   border-radius:8px;transition:color .15s}
 .btn-clear:hover{color:var(--text)}
 
+/* PREVIEW PLAYER -- floating glass dock over the bottom of the main area.
+   Appears when a track is previewing; streams via /api/songs/<id>/audio. */
+.player-bar{position:fixed;left:calc(var(--sidebar-w,288px) + 7px + 16px);right:16px;bottom:14px;
+  z-index:45;display:flex;align-items:center;gap:10px;padding:8px 12px;
+  background-color:var(--selbar);
+  background-image:linear-gradient(180deg,var(--glass-hi),transparent 60%);
+  -webkit-backdrop-filter:blur(22px) saturate(180%);backdrop-filter:blur(22px) saturate(180%);
+  border:1px solid rgba(56,226,255,.32);border-radius:12px;
+  box-shadow:0 10px 32px rgba(0,0,0,.5),inset 0 1px 0 var(--glass-hi);
+  opacity:0;transform:translateY(16px);pointer-events:none;
+  transition:opacity .18s ease,transform .24s cubic-bezier(.34,1.56,.64,1)}
+.player-bar.visible{opacity:1;transform:none;pointer-events:auto}
+.pb-btn{background:var(--chip-2);border:1px solid var(--border-strong);color:var(--text2);
+  width:30px;height:30px;border-radius:8px;cursor:pointer;flex-shrink:0;
+  display:grid;place-items:center;font-size:11px;line-height:1;
+  transition:all .15s}
+.pb-btn:hover{background:var(--cyan-dim);border-color:var(--cyan);color:var(--cyan)}
+.pb-btn:active{transform:scale(.92)}
+.pb-main{width:34px;height:34px;border-radius:50%;background:var(--cyan);color:var(--on-accent);
+  border:none;font-size:13px;box-shadow:0 2px 10px rgba(56,226,255,.28)}
+.pb-main:hover{background:var(--cyan);color:var(--on-accent);opacity:.92}
+.pb-close:hover{background:var(--red-dim);border-color:var(--red);color:var(--red)}
+.pb-meta{min-width:0;flex:0 1 220px}
+.pb-title{font-size:12.5px;font-weight:600;letter-spacing:-.01em;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pb-artist{font-size:10.5px;color:var(--muted);white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;margin-top:1px}
+.pb-time{font-family:var(--mono);font-size:10px;color:var(--muted);flex-shrink:0;
+  font-variant-numeric:tabular-nums;min-width:32px;text-align:center}
+.pb-seek{flex:1;-webkit-appearance:none;appearance:none;height:4px;min-width:60px;
+  background:var(--track);border-radius:2px;outline:none;cursor:pointer;transition:background .15s}
+.pb-seek:hover{background:var(--border-strong)}
+.pb-seek::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;
+  border-radius:50%;background:#fff;border:2px solid var(--cyan);
+  box-shadow:0 1px 5px rgba(0,0,0,.45);cursor:grab;transition:transform .12s}
+.pb-seek::-webkit-slider-thumb:hover{transform:scale(1.15)}
+.pb-seek::-webkit-slider-thumb:active{cursor:grabbing;transform:scale(1.3)}
+/* currently-playing row gets the accent treatment, like DJ software */
+.song-row.playing{background:var(--cyan-dim);box-shadow:inset 2px 0 0 var(--cyan)}
+
+/* TOAST -- lightweight acknowledgment for quiet actions (bottom-left, over the
+   sidebar, away from the player bar) */
+.toast{position:fixed;left:16px;bottom:14px;z-index:80;display:flex;align-items:center;gap:8px;
+  max-width:340px;padding:9px 14px;
+  background-color:var(--selbar);
+  background-image:linear-gradient(180deg,var(--glass-hi),transparent 60%);
+  -webkit-backdrop-filter:blur(22px) saturate(180%);backdrop-filter:blur(22px) saturate(180%);
+  border:1px solid var(--border-strong);border-radius:10px;
+  font-family:var(--mono);font-size:11px;color:var(--text);
+  box-shadow:0 10px 32px rgba(0,0,0,.5),inset 0 1px 0 var(--glass-hi);
+  opacity:0;transform:translateY(10px);pointer-events:none;
+  transition:opacity .2s ease,transform .25s cubic-bezier(.34,1.56,.64,1)}
+.toast.visible{opacity:1;transform:none}
+.toast .dot{background:var(--green);box-shadow:0 0 8px rgba(50,215,75,.5)}
+
+/* +1 button acknowledgment -- brief green pulse so a muted click still answers */
+@keyframes ackPulse{0%{transform:scale(1)}
+  40%{transform:scale(1.25);background:var(--green-dim);border-color:var(--green);color:var(--green)}
+  100%{transform:scale(1)}}
+.show-btn.ack{animation:ackPulse .5s ease}
+
+/* CONTEXT MENU -- right-click on the library when songs are selected */
+.ctx-menu{position:fixed;z-index:90;display:none;flex-direction:column;min-width:240px;padding:4px;
+  background-color:var(--selbar);
+  background-image:linear-gradient(180deg,var(--glass-hi),transparent 60%);
+  -webkit-backdrop-filter:blur(22px) saturate(180%);backdrop-filter:blur(22px) saturate(180%);
+  border:1px solid var(--border-strong);border-radius:10px;
+  box-shadow:0 10px 32px rgba(0,0,0,.5),inset 0 1px 0 var(--glass-hi)}
+.ctx-menu.open{display:flex}
+.ctx-item{background:none;border:none;color:var(--text2);font-family:var(--mono);font-size:11px;
+  text-align:left;padding:8px 10px;border-radius:7px;cursor:pointer;transition:background .12s,color .12s}
+.ctx-item:hover{background:var(--cyan-dim);color:var(--cyan)}
+.ctx-sep{height:1px;background:var(--border);margin:4px 6px}
+
+/* METADATA CLEANUP -- review-the-diff rows in the cleanup modal */
+.cu-row{border:1px solid var(--border);border-radius:12px;padding:10px 12px;
+  margin-bottom:10px;background:var(--dg)}
+.cu-head{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.cu-name{font-size:12.5px;font-weight:600;flex:1;min-width:0;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cu-conf{font-family:var(--mono);font-size:9px;padding:2px 7px;border-radius:100px;flex-shrink:0}
+.cu-conf.high{background:var(--green-dim);color:var(--green)}
+.cu-conf.medium{background:var(--yellow-dim);color:var(--yellow)}
+.cu-conf.low{background:var(--red-dim);color:var(--red)}
+.cu-diff{display:grid;grid-template-columns:52px 1fr 1fr;gap:3px 10px;
+  font-family:var(--mono);font-size:10.5px}
+.cu-k{color:var(--muted);text-transform:uppercase;font-size:9px;letter-spacing:.08em;align-self:center}
+.cu-old{color:var(--muted2);word-break:break-word}
+.cu-old.changed{text-decoration:line-through}
+.cu-new{color:var(--text);word-break:break-word}
+.cu-new.changed{color:var(--green)}
+
 /* FILTER BAR -- translucent glass, content can scroll under it */
 .filter-bar{grid-area:filters;
   background-color:var(--surface);
@@ -388,7 +492,7 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
 .table-header{
   position:sticky;top:0;z-index:5;
   display:grid;
-  grid-template-columns:var(--row-grid, 20px 32px 1fr 100px 58px 64px 60px 56px 72px);
+  grid-template-columns:var(--row-grid, 20px 32px minmax(140px,1fr) 100px 58px 64px 60px 56px 56px 92px);
   padding:0 14px;height:36px;align-items:center;
   background-color:var(--th-bg);
   background-image:linear-gradient(180deg,var(--glass-hi),transparent 60%);
@@ -421,7 +525,7 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
 
 .song-row{
   display:grid;
-  grid-template-columns:var(--row-grid, 20px 32px 1fr 100px 58px 64px 60px 56px 72px);
+  grid-template-columns:var(--row-grid, 20px 32px minmax(140px,1fr) 100px 58px 64px 60px 56px 56px 92px);
   padding:0 14px;height:46px;align-items:center;
   border-bottom:1px solid var(--row-border);
   transition:background .12s;cursor:pointer;
@@ -923,6 +1027,31 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
         <button class="btn-ghost" onclick="rescan()">↻ Re-scan folder</button>
         <button class="btn-ghost" id="bpmBtn" onclick="analyzeBpm()">♩ Analyze BPM & Key</button>
       </div>
+
+      <div style="margin-top:18px">
+        <div class="sb-label">Clean up metadata</div>
+        <button class="btn-ghost" id="cleanupScanBtn" onclick="startMetadataCleanup()">✨ Match tracks on Spotify…</button>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:10px">
+          <span style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--muted);text-transform:uppercase">Min confidence</span>
+          <div class="sw-pills" style="margin:0" id="cleanupConfPills"></div>
+        </div>
+        <div class="tool-card" style="margin-top:10px">
+          <div class="tool-opt">
+            <div class="tool-opt-text">
+              <div class="tool-opt-name">Only scan tracks never scanned</div>
+              <div class="tool-opt-desc">Skips anything a previous cleanup already looked at —
+                scans get faster and your manual tag edits are never overwritten later</div>
+            </div>
+            <label class="switch" title="Skip previously scanned tracks">
+              <input type="checkbox" id="cleanupSkipCheckbox" onchange="setCleanupSkipScanned(this)">
+              <span class="switch-track"></span>
+            </label>
+          </div>
+        </div>
+        <div class="tool-hint" id="cleanupHint">Matches tracks against Spotify and lets you
+          review every proposed Title / Artist / Album / Genre fix before anything is written.
+          Needs Spotify connected.</div>
+      </div>
     </div>
   </div>
 
@@ -980,6 +1109,46 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
       </div>
 
       <div style="margin-top:18px">
+        <div class="sb-label">Main colour (accent)</div>
+        <div class="tool-card">
+          <div class="tool-opt">
+            <div class="tool-opt-text">
+              <div class="tool-opt-name">☀ Day mode colour</div>
+              <div class="tool-opt-desc">Accent used in light mode. Default: turquoise (#0084a0)</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+              <input type="color" id="accentPicker_light" value="#0084a0"
+                onchange="onAccentChange('light', this.value)" oninput="onAccentChange('light', this.value)"
+                style="width:34px;height:28px;border:1px solid var(--border);border-radius:6px;background:var(--chip);padding:2px;cursor:pointer">
+              <input type="text" id="accentText_light" class="gfi" style="width:86px;font-size:10.5px"
+                value="#0084a0" spellcheck="false"
+                onchange="onAccentChange('light', this.value)"
+                onkeydown="if(event.key==='Enter')onAccentChange('light', this.value)">
+              <button class="btn-sel" onclick="resetAccent('light')" title="Reset to default">↺</button>
+            </div>
+          </div>
+          <div class="tool-opt" style="border-top:1px solid var(--row-border)">
+            <div class="tool-opt-text">
+              <div class="tool-opt-name">☾ Night mode colour</div>
+              <div class="tool-opt-desc">Accent used in dark mode. Default: turquoise (#38e2ff)</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+              <input type="color" id="accentPicker_dark" value="#38e2ff"
+                onchange="onAccentChange('dark', this.value)" oninput="onAccentChange('dark', this.value)"
+                style="width:34px;height:28px;border:1px solid var(--border);border-radius:6px;background:var(--chip);padding:2px;cursor:pointer">
+              <input type="text" id="accentText_dark" class="gfi" style="width:86px;font-size:10.5px"
+                value="#38e2ff" spellcheck="false"
+                onchange="onAccentChange('dark', this.value)"
+                onkeydown="if(event.key==='Enter')onAccentChange('dark', this.value)">
+              <button class="btn-sel" onclick="resetAccent('dark')" title="Reset to default">↺</button>
+            </div>
+          </div>
+        </div>
+        <div class="tool-hint" style="margin-top:8px">Changes apply instantly and are saved separately for day
+          and night mode. Leave the field empty and press Enter (or use ↺) to restore the default turquoise.</div>
+      </div>
+
+      <div style="margin-top:18px">
         <div class="sb-label">Key display</div>
         <div class="sw-pills" id="keyDisplayPills">
           <button class="sw-pill" data-sw="camelot" onclick="chooseKeyDisplay('camelot')">Camelot wheel (1A / 3B)</button>
@@ -995,6 +1164,16 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
         <div class="tool-hint" id="pythonStatusHint" style="margin-top:8px">Checks whether a
           usable Python 3 is available on this Mac — the one install.command needs to set things up.
           The app itself already runs on Python, so this usually just confirms what's installed.</div>
+      </div>
+
+      <div style="margin-top:18px">
+        <div class="sb-label">Feedback & support</div>
+        <button class="btn-ghost" onclick="openGitHubIssue('feature')">💡 Suggest a feature on GitHub</button>
+        <button class="btn-ghost" onclick="openGitHubIssue('bug')">🐞 Report a bug on GitHub</button>
+        <div class="tool-hint">Opens a pre-filled new issue on the project's GitHub repository.
+          Feature ideas and bug reports land straight where the app is developed.</div>
+        <button class="btn-ghost" onclick="window.open('https://buymeacoffee.com/5d2dm5mxh8','_blank')"
+          title="Support the app's development — opens buymeacoffee.com in a new tab">☕ Buy me a coffee</button>
       </div>
 
       <div style="margin-top:18px">
@@ -1230,6 +1409,49 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
   </div>
 </div>
 
+<!-- CONTEXT MENU -- right-click actions for the current selection -->
+<div class="ctx-menu" id="ctxMenu">
+  <button class="ctx-item" id="ctxScanNew" title="Match only tracks never scanned before">✨ Scan selected — new only</button>
+  <button class="ctx-item" id="ctxScanAll" title="Rescan even tracks already scanned">🔁 Scan selected — everything</button>
+  <div class="ctx-sep"></div>
+  <button class="ctx-item" id="ctxInfo">ℹ Track info</button>
+</div>
+
+<!-- TOAST -- small acknowledgment that fades on its own -->
+<div class="toast" id="toast"><div class="dot"></div><span id="toastText"></span></div>
+
+<!-- METADATA CLEANUP MODAL -- review proposed Spotify tag fixes before applying -->
+<div class="modal-bd" id="cleanupModal">
+  <div class="modal modal-w">
+    <div class="mhdr">
+      <div class="mtitle" style="color:var(--green)">✨ Clean up metadata</div>
+      <button class="mclose" onclick="closeMetadataCleanup()">✕</button>
+    </div>
+    <div class="mbody" id="cleanupModalBody">Loading…</div>
+    <div class="iacts">
+      <span id="cleanupApplyStatus" style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-right:auto"></span>
+      <button class="btn-ghost" style="width:auto" onclick="closeMetadataCleanup()">Cancel</button>
+      <button class="btn-save" style="background:var(--green)" id="cleanupApplyBtn" onclick="applyMetadataCleanup()">Apply selected</button>
+    </div>
+  </div>
+</div>
+
+<!-- PREVIEW PLAYER -- floating dock; appears when a track is previewing -->
+<div class="player-bar" id="playerBar">
+  <button class="pb-btn pb-main" id="playerPlay" onclick="togglePlay()" title="Play / pause (Space)">▶</button>
+  <button class="pb-btn" onclick="playerStep(-1)" title="Previous in list">⏮</button>
+  <div class="pb-meta">
+    <div class="pb-title" id="playerTitle">—</div>
+    <div class="pb-artist" id="playerArtist"></div>
+  </div>
+  <span class="pb-time" id="playerCur">0:00</span>
+  <input type="range" class="pb-seek" id="playerSeek" min="0" max="1000" value="0" step="1"
+    aria-label="Seek" title="Seek">
+  <span class="pb-time" id="playerDur">0:00</span>
+  <button class="pb-btn" onclick="playerStep(1)" title="Next in list">⏭</button>
+  <button class="pb-btn pb-close" onclick="stopPreview()" title="Stop and hide">✕</button>
+</div>
+
 <script>
 // MUSIC_DIR is overwritten from /api/config at startup (config.json is the
 // single source of truth) -- the value below is only a fallback if that fetch fails.
@@ -1261,6 +1483,84 @@ function toggleTheme(){
   const next = cur === 'light' ? 'dark' : 'light';
   document.documentElement.setAttribute('data-theme', next);
   try { localStorage.setItem('djlib_theme', next); } catch(e) {}
+  applyAccentForTheme(next);
+}
+
+// -- ACCENT COLOUR ------------------------------------------------------------
+// Each mode (light/dark) can have its own main colour, defaulting to the
+// built-in turquoise/cyan. Stored per-theme in localStorage and applied as
+// inline overrides of --cyan / --cyan-dim / --on-accent.
+function hexToRgb(hex){
+  const m = /^#?([0-9a-fA-F]{6})$/.exec((hex || '').trim());
+  if (!m) return null;
+  const v = parseInt(m[1], 16);
+  return [(v >> 16) & 255, (v >> 8) & 255, v & 255];
+}
+function applyAccentColor(hex, theme){
+  const s = document.documentElement.style;
+  const rgb = hexToRgb(hex);
+  if (!rgb){
+    // Empty or invalid input restores the built-in palette.
+    s.removeProperty('--cyan'); s.removeProperty('--cyan-dim'); s.removeProperty('--on-accent');
+    try { localStorage.removeItem(theme === 'light' ? 'djlib_accent_light' : 'djlib_accent_dark'); } catch(e) {}
+    return;
+  }
+  const [r, g, b] = rgb;
+  s.setProperty('--cyan', hex);
+  s.setProperty('--cyan-dim', 'rgba('+r+','+g+','+b+',.13)');
+  const lum = (0.299*r + 0.587*g + 0.114*b) / 255;
+  s.setProperty('--on-accent', lum > 0.6 ? '#04121a' : '#ffffff');
+  try { localStorage.setItem(theme === 'light' ? 'djlib_accent_light' : 'djlib_accent_dark', hex); } catch(e) {}
+}
+function applyAccentForTheme(theme){
+  let hex = null;
+  try { hex = localStorage.getItem(theme === 'light' ? 'djlib_accent_light' : 'djlib_accent_dark'); } catch(e) {}
+  applyAccentColor(hex, theme);
+  syncAccentInputs(theme);
+}
+function syncAccentInputs(theme){
+  let hex = null;
+  try { hex = localStorage.getItem(theme === 'light' ? 'djlib_accent_light' : 'djlib_accent_dark'); } catch(e) {}
+  const cur = hex || (theme === 'light' ? '#0084a0' : '#38e2ff');
+  const pick = document.getElementById('accentPicker_' + theme);
+  const text = document.getElementById('accentText_' + theme);
+  if (pick) pick.value = cur;
+  if (text) text.value = cur;
+}
+function onAccentChange(theme, value){
+  // Empty text field + Enter resets that mode to the default palette.
+  applyAccentColor(value && value.trim ? value.trim() : value, theme);
+  syncAccentInputs(theme);
+}
+function resetAccent(theme){
+  applyAccentColor(null, theme);
+  syncAccentInputs(theme);
+}
+// Re-apply the saved accent for the active theme on load (the inline head
+// script already handled first paint); this also fills the Settings inputs.
+applyAccentForTheme(document.documentElement.getAttribute('data-theme') || 'dark');
+
+// -- GITHUB FEEDBACK ----------------------------------------------------------
+// Opens a pre-filled new issue on the project's GitHub repository so feature
+// ideas and bug reports can be sent from inside the app.
+const GITHUB_REPO = 'https://github.com/5d2dm5mxh8-cpu/dj-library';
+function openGitHubIssue(kind){
+  let title = '';
+  let body = '';
+  if (kind === 'feature') {
+    title = 'Feature request: ';
+    body = '**What I\'d like to do**\n\n\n\n**How it would help my DJ workflow**\n\n\n\n**Anything else**\n\n';
+  } else {
+    title = 'Bug: ';
+    body = '**What happened**\n\n\n\n**What I expected instead**\n\n\n\n**Steps to reproduce**\n\n1. \n2. \n3. \n\n';
+    // Bug reports benefit from environment details; feature requests don't need them.
+    try {
+      body += '---\n*Reported from the DJ Library app — ' + navigator.userAgent + '*\n';
+    } catch(e) {}
+  }
+  body += '\n*Suggested from the DJ Library app*\n';
+  const url = GITHUB_REPO + '/issues/new?title=' + encodeURIComponent(title) + '&body=' + encodeURIComponent(body);
+  window.open(url, '_blank');
 }
 
 // -- COLUMN REORDERING -------------------------------------------------------
@@ -1305,12 +1605,22 @@ function defaultColWidths() {
   return d;
 }
 
+// Columns can never legitimately be narrower than these. Persisted widths may
+// still carry a 0 from an older session — without clamping, TITLE renders as
+// minmax(0px,1fr) and the whole column vanishes on load.
+function MIN_COL_WIDTH(key){ return key === 'title' ? 140 : 40; }
+
 function loadColWidths() {
   try {
     const saved = JSON.parse(localStorage.getItem('djlib_col_widths'));
     if (saved && typeof saved === 'object') {
       const d = defaultColWidths();
-      for (const k of Object.keys(d)) if (typeof saved[k] === 'number') d[k] = saved[k];
+      for (const k of Object.keys(d)) {
+        const v = saved[k];
+        // Accept only finite numbers, and clamp anything below the column's
+        // minimum so a stored 0 can never collapse a column again.
+        if (typeof v === 'number' && isFinite(v)) d[k] = Math.max(MIN_COL_WIDTH(k), v);
+      }
       return d;
     }
   } catch {}
@@ -1323,11 +1633,15 @@ function saveColWidths() {
 
 let colWidths = loadColWidths();
 
-// A column's effective grid width -- title stays flexible unless the user sized it
+// A column's effective grid width -- title stays flexible but NEVER below its
+// minimum: a narrow main area (wide sidebar, small window) would otherwise
+// squeeze the 1fr title track to 0px and hide every title. With the minmax
+// floor the row overflows into a horizontal scroll instead.
 function renderWidth(key) {
-  const w = colWidths[key];
-  if (key === 'title' && w === '1fr') return '1fr';
-  if (key === 'title') return `minmax(${w}px, 1fr)`;
+  let w = colWidths[key];
+  // Defense in depth: even a corrupted in-memory value can't collapse a column.
+  if (typeof w === 'number' && w < MIN_COL_WIDTH(key)) w = MIN_COL_WIDTH(key);
+  if (key === 'title') return `minmax(${w === '1fr' ? MIN_COL_WIDTH(key) : w}px, 1fr)`;
   return `${w}px`;
 }
 
@@ -1352,7 +1666,7 @@ function onColResizeStart(e, key) {
   const startX = e.clientX;
   const startW = colWidths[key] === '1fr' ? 260 : colWidths[key];
   const move = ev => {
-    const w = Math.max(key === 'title' ? 140 : 40, startW + (ev.clientX - startX));
+    const w = Math.max(MIN_COL_WIDTH(key), startW + (ev.clientX - startX));
     colWidths[key] = Math.round(w);
     applyGridTemplate();
   };
@@ -1382,7 +1696,7 @@ function autoFitColumn(key) {
       cell.querySelectorAll('.stitle,.sartist').forEach(el => max = Math.max(max, el.scrollWidth));
     }
   });
-  colWidths[key] = Math.max(key === 'title' ? 140 : 40, Math.min(max + 14, 600));
+  colWidths[key] = Math.max(MIN_COL_WIDTH(key), Math.min(max + 14, 600));
   applyGridTemplate();
   saveColWidths();
   // brief highlight so the freshly fitted column is easy to spot
@@ -1548,6 +1862,7 @@ async function loadSongs(crateId=null) {
   allSongs = await resp.json();
   buildFolderList();
   applyFilters();
+  updateCleanupHint();
 }
 
 async function loadGenreSuggestions() {
@@ -1571,6 +1886,7 @@ function showTab(name) {
   document.getElementById(`tab-${name}`).classList.add('active');
   // Fresh data whenever the Transitions tab becomes visible
   if(name==='transitions') renderTransitionTab();
+  if(name==='tools') updateCleanupHint();
 }
 
 // ── DJ SOFTWARE & SETTINGS ───────────────────────────────────────────────────
@@ -1814,7 +2130,7 @@ async function loadCrates() {
   const crates = await resp.json();
   const list = document.getElementById('crateList');
   window._allCrates = crates;  // cache for the "add to crate" picker
-  list.innerHTML = crates.map(c=>`
+  list.innerHTML = crates.length ? crates.map(c=>`
     <div class="nav-item ${currentCrate===c.id?'active':''}" id="crate-nav-${c.id}"
       onclick="selectCrate(${c.id},this)">
       <span class="nav-item-label">${esc(c.name)}</span>
@@ -1824,7 +2140,10 @@ async function loadCrates() {
       <button class="nav-item-sync" onclick="event.stopPropagation();exportCrateXml(${c.id})"
         title="Export this crate for Rekordbox/Serato/DJUCED">⭳</button>
       <button class="nav-item-del" onclick="event.stopPropagation();deleteCrate(${c.id})" title="Delete">✕</button>
-    </div>`).join('');
+    </div>`).join('')
+  : `<div class="tool-hint" style="padding:6px 2px;line-height:1.7">No crates yet. Crates are a gig's
+     folders: select songs in the library → <b style="color:var(--text2)">+ Add to Crate</b>, or build a
+     <b style="color:var(--text2)">smart crate</b> that fills itself from rules (BPM, key, genre…).</div>`;
   populateImportCrateSelect();
   populateDownloadCrateSelect();
 }
@@ -2091,14 +2410,29 @@ async function syncMixxxPlayCounts(){
   }else alert('Play-count sync failed: '+(data.error||'unknown error'));
 }
 
-async function markSongPlayed(songId){
+async function markSongPlayed(btn, songId){
   const resp=await fetch(`/api/songs/${songId}/played`,{method:'POST'});
   const data=await resp.json();
   if(!data.error){
     const song=allSongs.find(s=>s.id===songId);
     if(song) song.play_count=data.play_count;
+    // Acknowledge before the re-render: the count may be off-screen, so the
+    // button itself pulses and a toast confirms.
+    if(btn){ btn.classList.add('ack'); setTimeout(()=>btn.classList.remove('ack'), 550); }
+    toast(`+1 “${(song && song.title) || 'track'}”`);
     applyFilters();
   }
+}
+
+// -- TOAST --------------------------------------------------------------------
+let _toastTimer=null;
+function toast(msg){
+  const t=document.getElementById('toast');
+  if(!t) return;
+  document.getElementById('toastText').textContent=msg;
+  t.classList.add('visible');
+  clearTimeout(_toastTimer);
+  _toastTimer=setTimeout(()=>t.classList.remove('visible'), 2600);
 }
 
 async function syncCrateToMixxx(crateId) {
@@ -2168,7 +2502,7 @@ async function confirmAddToCrate(crateId, crateName) {
   });
   closeAddToCrateModal();
   clearSelection();
-  alert(`Added to "${crateName}".`);
+  toast(`Added ${pendingCrateSongIds.length} song${pendingCrateSongIds.length===1?'':'s'} to “${crateName}”`);
 }
 
 function closeAddToCrateModal() {
@@ -2428,7 +2762,28 @@ function renderSongs(songs){
   const rows=document.getElementById('songRows');
   if(!rows) return;
   if(!songs.length){
-    rows.innerHTML=`<div class="empty"><div class="empty-icon">♫</div><div>No tracks match</div></div>`;
+    // Three different empties say three different things: a brand-new library
+    // invites setup, an empty crate explains how crates fill, filtered-nothing
+    // offers the way out.
+    if(!allSongs.length){
+      rows.innerHTML = currentCrate
+        ? `<div class="empty"><div class="empty-icon">📦</div>
+           <div>This crate is empty</div>
+           <div style="font-size:12px;color:var(--muted);max-width:360px;text-align:center;line-height:1.6">
+             Select songs under <b>All tracks</b>, then use <b>+ Add to Crate</b> in the toolbar.</div></div>`
+        : `<div class="empty"><div class="empty-icon">🎧</div>
+           <div style="font-size:15px;font-weight:600;color:var(--text)">Your library is empty</div>
+           <div style="font-size:12px;color:var(--muted);max-width:400px;text-align:center;line-height:1.7">
+             Three ways to fill it:<br>
+             ① Paste a Spotify link or song name in the <b>Download</b> box and hit GET<br>
+             ② Drop files into your music folder — they appear here automatically<br>
+             ③ Tools → Import Folder to copy in an existing collection</div>
+           <button class="btn-ghost" style="width:auto;margin-top:4px" onclick="openIntroGuide()">📖 Open the intro guide</button></div>`;
+    } else {
+      rows.innerHTML = `<div class="empty"><div class="empty-icon">♫</div>
+        <div>No tracks match your filters</div>
+        <button class="btn-ghost" style="width:auto" onclick="resetFilters()">✕ Clear filters</button></div>`;
+    }
     return;
   }
   rows.innerHTML=songs.map((s,i)=>{
@@ -2444,15 +2799,16 @@ function renderSongs(songs){
     const v={title,artist,genre,bpm,key,dur,size};
     const dataCells=columnOrder.map(k=>cellForColumn(k,s,v)).join('');
     return `
-      <div class="song-row${sel?' selected':''}" id="row-${s.id}"
+      <div class="song-row${sel?' selected':''}${s.id===playerSongId?' playing':''}" id="row-${s.id}"
         onclick="onRowClick(event,${s.id})"
         ondblclick="onRowDoubleClick(event,${s.id})"
-        oncontextmenu="openInfoModal([${s.id}],event)">
+        oncontextmenu="onRowContext(event,${s.id})">
         <div class="row-cb" id="cb-${s.id}"></div>
         <div class="si2">${i+1}</div>
         ${dataCells}
         <div class="row-acts" onclick="event.stopPropagation()">
-          <button class="show-btn" onclick="markSongPlayed(${s.id})" title="Increase play count">+1</button>
+          <button class="show-btn" onclick="playSong(${s.id})" title="Preview in the player bar (double-click row works too)">▶</button>
+          <button class="show-btn" id="played-${s.id}" onclick="markSongPlayed(this,${s.id})" title="Increase play count">+1</button>
           <button class="show-btn" onclick="revealInFinder('${fp.replace(/'/g,"\\'")}')">Show</button>
           <button class="del-btn" onclick="deleteSong(${s.id},'${title}')">✕</button>
         </div>
@@ -2477,8 +2833,9 @@ function onRowDoubleClick(event, songId){
   // Ignore double-clicks landing on the row's own buttons/cells
   if(event.target.closest('.row-acts')||event.target.classList.contains('gc')
       ||event.target.classList.contains('ge')) return;
-  const song=allSongs.find(s=>s.id===songId);
-  if(song) revealInFinder(song.filepath);
+  // Double-click previews the track in the player bar, the way DJ software
+  // does; "Show" in the row actions still reveals the file in Finder.
+  playSong(songId);
 }
 
 document.addEventListener('keydown', e=>{
@@ -2490,7 +2847,20 @@ document.addEventListener('keydown', e=>{
     });
     updateSelectionBar();
   }
-  if(e.key==='Escape') clearSelection();
+  if(e.code==='Space' && !playerIsTyping(e)){
+    // Space previews/pauses the current track; guarded so typing in inputs,
+    // selects and editors never triggers it.
+    e.preventDefault();
+    togglePlay();
+  }
+  if(e.key==='Escape'){
+    hideCtxMenu();
+    // Escape dismisses an open modal first; only when no modal is open does it
+    // clear the selection — otherwise a hidden selection vanish mid-edit.
+    const openModal=document.querySelector('.modal-bd.open');
+    if(openModal){ closeOpenModal(openModal.id); return; }
+    clearSelection();
+  }
 });
 
 function updateRowSelection(songId){
@@ -3167,6 +3537,7 @@ function setStatus(type,text){
 async function deleteSong(id,title){
   if(!confirm(`Delete "${title}"?`)) return;
   await fetch(`/api/songs/${id}`,{method:'DELETE'});
+  toast(`Deleted “${title}”`);
   await loadSongs(currentCrate);await checkDuplicates();
 }
 
@@ -3529,17 +3900,22 @@ function displayKey(raw){
 function cleanName(n){return n.replace(/\.(mp3|wav|flac|m4a)$/i,'').replace(/\(SPOTISAVER\)/g,'').trim()}
 function esc(s){if(!s)return'';return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')}
 
-['infoModal','dupeModal','crateModal','addToCrateModal','addTransitionModal','mergeModal','mergePickerModal','folderPickerModal'].forEach(id=>{
+function closeOpenModal(id){
+  if(id==='infoModal') closeInfoModal();
+  else if(id==='dupeModal') closeDupeModal();
+  else if(id==='addToCrateModal') closeAddToCrateModal();
+  else if(id==='addTransitionModal') closeAddTransitionModal();
+  else if(id==='mergeModal') closeMergeModal();
+  else if(id==='mergePickerModal') closeMergePicker();
+  else if(id==='folderPickerModal') closeFolderPicker();
+  else if(id==='cleanupModal') closeMetadataCleanup();
+  else closeCrateModal();
+}
+
+['infoModal','dupeModal','crateModal','addToCrateModal','addTransitionModal','mergeModal','mergePickerModal','folderPickerModal','cleanupModal'].forEach(id=>{
   document.getElementById(id).addEventListener('click',e=>{
     if(e.target===e.currentTarget){
-      if(id==='infoModal') closeInfoModal();
-      else if(id==='dupeModal') closeDupeModal();
-      else if(id==='addToCrateModal') closeAddToCrateModal();
-      else if(id==='addTransitionModal') closeAddTransitionModal();
-      else if(id==='mergeModal') closeMergeModal();
-      else if(id==='mergePickerModal') closeMergePicker();
-      else if(id==='folderPickerModal') closeFolderPicker();
-      else closeCrateModal();
+      closeOpenModal(id);
     }
   });
 });
@@ -3589,8 +3965,417 @@ async function spotifyLogout() {
   showAuthStatus(false);
 }
 
+// ── METADATA CLEANUP ─────────────────────────────────────────────────────
+// Scans tracks with missing artist/genre, matches each against Spotify, and
+// shows a review-the-diff list. Nothing touches the files until the user
+// checks rows and hits Apply — each apply is one POST that writes ID3 + DB.
+let cleanupProposals = [];
+let cleanupScanAbort = false;
+let cleanupScanning = false;
+let cleanupScanError = null;
+let cleanupScannedIds = [];
+
+// Minimum match confidence shown in the review list (low = show everything).
+const CLEANUP_CONF_RANK = { low: 0, medium: 1, high: 2 };
+let cleanupMinConfidence = 'low';
+try{ const c = localStorage.getItem('djlib_cleanup_conf');
+     if (c in CLEANUP_CONF_RANK) cleanupMinConfidence = c; }catch(e){}
+
+function setCleanupConfidence(level){
+  if (!(level in CLEANUP_CONF_RANK)) return;
+  cleanupMinConfidence = level;
+  try{ localStorage.setItem('djlib_cleanup_conf', level); }catch(e){}
+  renderCleanupConfPills();
+  renderCleanupReview();
+}
+
+// Shared Low/Med/High pill row — shown both in the Tools tab (before scanning)
+// and in the review modal.
+function cleanupConfPill(lvl){
+  return `<button class="sw-pill${cleanupMinConfidence===lvl?' active':''}"
+    onclick="setCleanupConfidence('${lvl}')">${lvl === 'medium' ? 'Med' : lvl[0].toUpperCase() + lvl.slice(1)}</button>`;
+}
+function renderCleanupConfPills(){
+  const el = document.getElementById('cleanupConfPills');
+  if (el) el.innerHTML = cleanupConfPill('low') + cleanupConfPill('medium') + cleanupConfPill('high');
+}
+
+let cleanupReviewShown = false;
+
+function openCleanupModal(){ document.getElementById('cleanupModal').classList.add('open'); }
+
+// The proposal checkboxes currently rendered in the review panel.
+function cuVisibleRows(){
+  const rows = [];
+  document.querySelectorAll('#cleanupModalBody .cu-row input[type=checkbox]').forEach(cb => {
+    const m = cb.id.match(/^cu-chk-(\d+)$/);
+    if (m) rows.push({ id: +m[1], checked: cb.checked });
+  });
+  return rows;
+}
+
+function markCleanupDecision(ids, decision){
+  if(!ids.length) return;
+  // Update the in-memory copies immediately — otherwise the next scan in this
+  // same session still sees these tracks as never-scanned and re-scans
+  // everything. The server is the source of truth; this mirrors it locally.
+  const idSet = new Set(ids);
+  allSongs.forEach(s => {
+    if (idSet.has(s.id)) {
+      if (!s.cleanup_scanned_at) s.cleanup_scanned_at = new Date().toISOString();
+      s.cleanup_decision = decision;
+    }
+  });
+  updateCleanupHint();
+  fetch('/api/cleanup/mark-scanned', { method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ ids, decision }) }).catch(()=>{});
+}
+
+function closeMetadataCleanup(){
+  // Rows the user saw and left unchecked are a decision — "keep my tags" —
+  // so they're remembered and never re-proposed. Checked-but-cancelled rows
+  // and rows hidden by the threshold stay undecided and will come back.
+  if(cleanupReviewShown){
+    markCleanupDecision(cuVisibleRows().filter(r => !r.checked).map(r => r.id), 'skipped');
+    cleanupReviewShown = false;
+  }
+  cleanupScanAbort = true;
+  document.getElementById('cleanupModal').classList.remove('open');
+}
+// Backdrop click closes (same pattern as the other modals).
+document.getElementById('cleanupModal').addEventListener('click', e=>{
+  if(e.target === e.currentTarget) closeMetadataCleanup();
+});
+
+// Ends a scan (completed, cancelled, or stopped on a config error). Tracks
+// where Spotify had nothing are decided without a panel ('no_match'); tracks
+// with a proposal wait for the user's check/uncheck in the review panel.
+function finishCleanupScan(){
+  cleanupScanning = false;
+  const proposed = new Set(cleanupProposals.map(p => p.song_id));
+  const noMatch = cleanupScannedIds.filter(id => !proposed.has(id));
+  markCleanupDecision(noMatch, 'no_match');
+}
+
+function cleanupSkipScanned(){
+  try{ return localStorage.getItem('djlib_cleanup_skip_scanned') !== '0'; }catch(e){ return true; }
+}
+function setCleanupSkipScanned(cb){
+  try{ localStorage.setItem('djlib_cleanup_skip_scanned', cb.checked ? '1' : '0'); }catch(e){}
+  updateCleanupHint();
+}
+
+function cleanupTargets(){
+  // The YouTube-scrape leftovers: no artist, or no genre.
+  let targets = allSongs.filter(s => !s.artist || !s.genre);
+  if (cleanupSkipScanned()) targets = targets.filter(s => !s.cleanup_scanned_at);
+  return targets;
+}
+
+// ── SCAN SELECTED (right-click menu) ─────────────────────────────────────────
+let ctxMenuSongId = null;
+
+function onRowContext(event, songId){
+  event.preventDefault();
+  // With a selection, right-click offers actions on the selection; without
+  // one it keeps the old behaviour (open the track's info panel).
+  if(selectedIds.size > 0) showCtxMenu(event, songId);
+  else openInfoModal([songId], event);
+}
+
+function showCtxMenu(event, songId){
+  ctxMenuSongId = songId;
+  const menu = document.getElementById('ctxMenu');
+  const n = selectedIds.size;
+  document.getElementById('ctxScanNew').textContent = `✨ Scan ${n} selected — new only`;
+  document.getElementById('ctxScanAll').textContent = `🔁 Scan ${n} selected — everything`;
+  document.getElementById('ctxInfo').textContent = n > 1 ? `ℹ Info for the clicked track` : 'ℹ Track info';
+  menu.classList.add('open');
+  // Clamp inside the viewport (offsetWidth is only known once displayed).
+  const w = menu.offsetWidth, h = menu.offsetHeight;
+  menu.style.left = Math.max(8, Math.min(event.clientX, innerWidth  - w - 8)) + 'px';
+  menu.style.top  = Math.max(8, Math.min(event.clientY, innerHeight - h - 8)) + 'px';
+}
+
+function hideCtxMenu(){ document.getElementById('ctxMenu').classList.remove('open'); }
+document.addEventListener('click', e => { if(!e.target.closest('#ctxMenu')) hideCtxMenu(); });
+window.addEventListener('blur', hideCtxMenu);
+document.getElementById('ctxScanNew').onclick = () => { hideCtxMenu(); scanSelected(false); };
+document.getElementById('ctxScanAll').onclick = () => { hideCtxMenu(); scanSelected(true);  };
+document.getElementById('ctxInfo').onclick    = () => { hideCtxMenu(); openInfoModal(ctxMenuSongId ? [ctxMenuSongId] : [...selectedIds]); };
+
+function scanSelected(scanEverything){
+  const sel = allSongs.filter(s => selectedIds.has(s.id));
+  if(!sel.length){ alert('No songs selected. Cmd+click songs first.'); return; }
+  if(scanEverything){
+    const already = sel.filter(s => s.cleanup_scanned_at).length;
+    if(already && !confirm(
+      `Rescan ${sel.length} selected track(s), including ${already} already scanned?\n\n` +
+      `Fixes you previously kept-as-is may be proposed again.`)) return;
+    startMetadataCleanup(sel);
+  } else {
+    const fresh = sel.filter(s => !s.cleanup_scanned_at);
+    if(!fresh.length){
+      alert(`All ${sel.length} selected track(s) were already scanned.\n` +
+            `Use “Scan selected — everything” to rescan them anyway.`);
+      return;
+    }
+    if(fresh.length < sel.length &&
+       !confirm(`${sel.length - fresh.length} of ${sel.length} selected track(s) were already scanned and will be skipped.\n\nScan the ${fresh.length} never-scanned track(s)?`)) return;
+    startMetadataCleanup(fresh);
+  }
+}
+
+// Live count under the Tools toggle so the choice is visible before scanning.
+function updateCleanupHint(){
+  const cb = document.getElementById('cleanupSkipCheckbox');
+  if(!cb) return;
+  cb.checked = cleanupSkipScanned();
+  renderCleanupConfPills();
+  const missing = allSongs.filter(s => !s.artist || !s.genre);
+  const todo = cleanupSkipScanned() ? missing.filter(s => !s.cleanup_scanned_at) : missing;
+  const applied = allSongs.filter(s => s.cleanup_decision === 'applied').length;
+  const kept = allSongs.filter(s => s.cleanup_decision === 'skipped').length;
+  const el = document.getElementById('cleanupHint');
+  if(el) el.textContent =
+    `${todo.length} track${todo.length===1?'':'s'} to scan` +
+    (applied || kept ? ` · ${applied} fixed via Spotify · ${kept} kept as-is` : '') +
+    '. Matching happens on Spotify; you review every fix before anything is written.' +
+    (todo.length === 0 && missing.length ? ' Uncheck the toggle above to rescan everything.' : '');
+}
+
+async function startMetadataCleanup(explicitTargets){
+  if(cleanupScanning) return;
+  if(!allSongs.length){ alert('Load the library first.'); return; }
+  // Explicit list = "scan selected" from the right-click menu; the caller has
+  // already handled warnings and the never-scanned filter.
+  const targets = Array.isArray(explicitTargets) ? explicitTargets : cleanupTargets();
+  if(!targets.length){
+    if(Array.isArray(explicitTargets)){ alert('Nothing to scan in the selection.'); return; }
+    const missing = allSongs.filter(s => !s.artist || !s.genre).length;
+    alert(missing
+      ? 'Every track has already been scanned — nothing new to check.\nUncheck “Only scan tracks never scanned” to rescan everything.'
+      : 'Every track already has artist and genre tags ✨');
+    return;
+  }
+  cleanupProposals = [];
+  cleanupScanError = null;
+  cleanupScannedIds = [];
+  cleanupReviewShown = false;
+  cleanupScanAbort = false;
+  cleanupScanning = true;
+  document.getElementById('cleanupApplyBtn').style.display = 'none';
+  document.getElementById('cleanupApplyStatus').textContent = '';
+  openCleanupModal();
+  const body = document.getElementById('cleanupModalBody');
+  for(let i = 0; i < targets.length; i++){
+    if(cleanupScanAbort){ finishCleanupScan(); return; }
+    const s = targets[i];
+    body.innerHTML = `<div class="empty" style="padding:40px 0"><div class="empty-icon">✨</div>
+      <div>Matching on Spotify… ${i+1} / ${targets.length}</div>
+      <div style="font-size:11px;color:var(--muted)">${esc(s.title || s.filename)}</div>
+      <div style="font-size:10px;color:var(--muted2);margin-top:6px">Close this window to stop early</div></div>`;
+    try{
+      const r = await fetch(`/api/cleanup/match/${s.id}`);
+      const d = await r.json();
+      // A config problem should say what to do, not masquerade as "no matches".
+      if(r.status === 400 && d.error){ cleanupScanError = d.error; break; }
+      if(d && d.found) cleanupProposals.push(d);
+    }catch(e){}
+    cleanupScannedIds.push(s.id);
+    await new Promise(r=>setTimeout(r,120));   // gentle on the Spotify API
+  }
+  finishCleanupScan();
+  renderCleanupReview();
+}
+
+function cuDiffRow(p){
+  const song = allSongs.find(s=>s.id===p.song_id) || {};
+  const cur = {
+    Title:  song.title  || song.filename || '—',
+    Artist: song.artist || '—',
+    Album:  song.album  || '—',
+    Year:   song.year   || '—',
+    Genre:  song.genre  || '—'
+  };
+  const prop = {
+    Title:  p.title,  Artist: p.artist, Album: p.album,
+    Year:   p.year,   Genre:  p.genre || '—'
+  };
+  const changed = k => String(cur[k]).trim().toLowerCase() !== String(prop[k]||'—').trim().toLowerCase();
+  const fields = Object.keys(cur).map(k => `
+    <div class="cu-k">${k}</div>
+    <div class="cu-old${changed(k)?' changed':''}">${esc(cur[k])}</div>
+    <div class="cu-new${changed(k)?' changed':''}">${esc(prop[k]||'—')}</div>`).join('');
+  return `<div class="cu-row">
+    <div class="cu-head">
+      <input type="checkbox" id="cu-chk-${p.song_id}" ${p.confidence==='low'?'':'checked'}
+        style="accent-color:var(--cyan);flex-shrink:0" title="Apply this fix">
+      <div class="cu-name" title="${esc(song.title || '')}">${esc(song.title || song.filename || '')}</div>
+      <span class="cu-conf ${p.confidence}">${p.confidence}${p.duration_delta!=null?` · ±${p.duration_delta}s`:''}</span>
+    </div>
+    <div class="cu-diff">
+      <div class="cu-k"></div><div class="cu-k">current</div><div class="cu-k">spotify</div>
+      ${fields}
+    </div>
+  </div>`;
+}
+
+function renderCleanupReview(){
+  const body = document.getElementById('cleanupModalBody');
+  if(cleanupScanError){
+    body.innerHTML = `<div class="empty" style="padding:30px 0"><div class="empty-icon">🔌</div>
+      <div style="font-weight:600;color:var(--text)">Spotify isn't available</div>
+      <div style="font-size:12px;color:var(--muted);max-width:380px;text-align:center;line-height:1.7">
+        ${esc(cleanupScanError)}.<br>
+        Add your Client ID / Secret to <b style="color:var(--text2)">~/.dj-library/config.json</b>
+        (Spotify setup in the README), restart the app, and try again.</div></div>`;
+    return;
+  }
+  if(!cleanupProposals.length){
+    body.innerHTML = `<div class="empty" style="padding:40px 0"><div class="empty-icon">🎧</div>
+      <div>${cleanupScanAbort ? 'Scan cancelled' : 'No Spotify matches found'}.</div></div>`;
+    return;
+  }
+  // Threshold: only show matches at or above the chosen confidence. Hidden
+  // rows are NOT decided — they come back unless the user lowers the threshold.
+  const shown = cleanupProposals.filter(p =>
+    CLEANUP_CONF_RANK[p.confidence] >= CLEANUP_CONF_RANK[cleanupMinConfidence]);
+  const hidden = cleanupProposals.length - shown.length;
+  body.innerHTML = `
+    <div style="font-size:11px;color:var(--muted);margin-bottom:10px">
+      ${shown.length} of ${cleanupProposals.length} match${cleanupProposals.length===1?'':'es'} shown${hidden ? ` · ${hidden} below threshold (undecided)` : ''}.
+      Uncheck anything you don't want changed —
+      <b style="color:var(--text2)">nothing is written until you hit Apply</b>.</div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+      <span style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--muted);text-transform:uppercase">Min confidence</span>
+      <div class="sw-pills" style="margin:0">${cleanupConfPill('low')}${cleanupConfPill('medium')}${cleanupConfPill('high')}</div>
+    </div>
+    ${shown.length
+      ? shown.map(cuDiffRow).join('')
+      : `<div class="empty" style="padding:26px 0"><div class="empty-icon">🎯</div>
+         <div>No matches at ${cleanupMinConfidence} confidence or above</div>
+         <div style="font-size:11px;color:var(--muted)">Lower the threshold to see the rest.</div></div>`}`;
+  document.getElementById('cleanupApplyBtn').style.display = '';
+  cleanupReviewShown = true;
+}
+
+async function applyMetadataCleanup(){
+  const rows = cuVisibleRows();
+  const chosen = cleanupProposals.filter(p => rows.some(r => r.id === p.song_id && r.checked));
+  const uncheckedSeen = rows.filter(r => !r.checked).map(r => r.id);
+  if(!chosen.length){ alert('Nothing selected.'); return; }
+  const btn = document.getElementById('cleanupApplyBtn');
+  const status = document.getElementById('cleanupApplyStatus');
+  btn.disabled = true;
+  let done = 0, failed = 0;
+  for(const p of chosen){
+    status.textContent = `Writing ${done + failed + 1} / ${chosen.length}…`;
+    try{
+      const r = await fetch(`/api/cleanup/apply/${p.song_id}`, {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ title:p.title, artist:p.artist, album:p.album,
+                               year:p.year, genre:p.genre, spotify_id:p.spotify_id })
+      });
+      if(r.ok) done++; else failed++;
+    }catch(e){ failed++; }
+  }
+  btn.disabled = false;
+  status.textContent = `✓ Updated ${done} track${done===1?'':'s'}${failed ? ` · ${failed} failed` : ''}`;
+  // Applied rows were marked 'applied' by the server; the ones the user saw
+  // and left unchecked are recorded as "keep my tags".
+  markCleanupDecision(uncheckedSeen, 'skipped');
+  cleanupReviewShown = false;
+  await loadSongs();
+}
+
+// ── PREVIEW PLAYER ────────────────────────────────────────────────────────
+// Streams the audio file for a track from the backend into one shared
+// <audio> element. "Next/previous" walk visibleSongs, so they follow
+// whatever the current filter + sort is showing.
+let playerSongId = null;
+let playerSeeking = false;
+const playerAudio = new Audio();
+
+function playerIsTyping(e){
+  const t = e.target;
+  return !!(t && (t.tagName==='INPUT' || t.tagName==='TEXTAREA' ||
+                  t.tagName==='SELECT' || t.isContentEditable));
+}
+
+function playSong(songId){
+  const song = allSongs.find(s=>s.id===songId);
+  if(!song) return;
+  playerSongId = songId;
+  playerAudio.src = `/api/songs/${songId}/audio`;
+  playerAudio.play().catch(()=>{});
+  document.getElementById('playerTitle').textContent = song.title || song.filename || 'Untitled';
+  document.getElementById('playerArtist').textContent = song.artist || '—';
+  document.getElementById('playerDur').textContent = fmtDur(song.duration_seconds) || '0:00';
+  document.getElementById('playerBar').classList.add('visible');
+  document.querySelectorAll('.song-row.playing').forEach(r=>r.classList.remove('playing'));
+  const row = document.getElementById(`row-${songId}`);
+  if(row) row.classList.add('playing');
+}
+
+function togglePlay(){
+  if(!playerSongId){
+    // Nothing loaded yet: start with the first track in the current view.
+    if(visibleSongs.length) playSong(visibleSongs[0].id);
+    return;
+  }
+  if(playerAudio.paused) playerAudio.play().catch(()=>{});
+  else playerAudio.pause();
+}
+
+function playerStep(dir){
+  if(!visibleSongs.length) return;
+  let idx = visibleSongs.findIndex(s=>s.id===playerSongId);
+  idx = idx < 0
+    ? (dir > 0 ? 0 : visibleSongs.length - 1)
+    : (idx + dir + visibleSongs.length) % visibleSongs.length;
+  playSong(visibleSongs[idx].id);
+}
+
+function stopPreview(){
+  playerAudio.pause();
+  playerAudio.removeAttribute('src');
+  playerAudio.load();
+  playerSongId = null;
+  document.getElementById('playerBar').classList.remove('visible');
+  document.getElementById('playerSeek').value = 0;
+  document.getElementById('playerCur').textContent = '0:00';
+  document.querySelectorAll('.song-row.playing').forEach(r=>r.classList.remove('playing'));
+}
+
+function fmtPlayerTime(sec){
+  if(!isFinite(sec)) return '0:00';
+  const m = Math.floor(sec/60), s = Math.floor(sec%60);
+  return `${m}:${String(s).padStart(2,'0')}`;
+}
+
+playerAudio.addEventListener('play',  ()=>{ document.getElementById('playerPlay').textContent='⏸'; });
+playerAudio.addEventListener('pause', ()=>{ if(playerSongId) document.getElementById('playerPlay').textContent='▶'; });
+// When a track finishes, stop there — never start another song on its own.
+playerAudio.addEventListener('ended', ()=>{
+  playerAudio.currentTime = 0;
+});
+playerAudio.addEventListener('timeupdate', ()=>{
+  if(playerSeeking || !isFinite(playerAudio.duration)) return;
+  document.getElementById('playerSeek').value = playerAudio.duration
+    ? Math.round(playerAudio.currentTime / playerAudio.duration * 1000) : 0;
+  document.getElementById('playerCur').textContent = fmtPlayerTime(playerAudio.currentTime);
+});
+document.getElementById('playerSeek').addEventListener('input', e=>{
+  playerSeeking = true;
+  if(isFinite(playerAudio.duration))
+    playerAudio.currentTime = e.target.value / 1000 * playerAudio.duration;
+});
+document.getElementById('playerSeek').addEventListener('change', ()=>{ playerSeeking = false; });
+
 init();
 checkSpotifyAuth();
 </script>
 </body>
 </html>
+
