@@ -6,10 +6,6 @@ your DJ software — Mixxx, Rekordbox, Serato DJ Pro, DJUCED or Engine DJ.
 Built as a single Flask backend with a vanilla JS frontend — no Node, no build
 step, no database server (SQLite).
 
-## Download destinations
-
-The Download panel includes a crate selector beside the folder destination. Choose a manual crate before clicking GET to add newly downloaded songs to that crate. This applies to single tracks, pasted lists, Spotify track lists, and playlists. Smart crates are not selectable because their membership is calculated from rules.
-
 ## Features
 
 - **Library** — scan, browse, search, filter and sort your music folder; BPM
@@ -17,7 +13,11 @@ The Download panel includes a crate selector beside the folder destination. Choo
   editing straight from the table.
 - **Downloader** — paste a Spotify link, a song name, or a whole list; tracks
   are downloaded via `yt-dlp`, converted to MP3 with ffmpeg, tagged, and
-  analyzed. `yt-dlp` is bootstrapped and self-updated by the app, so YouTube
+  analyzed. Before you hit **GET**, you can pick a crate in the dropdown next
+  to the folder field — everything you download (single tracks, pasted lists,
+  Spotify playlists) is then added to that crate automatically. Smart crates
+  aren't offered there, since their membership comes from their rules.
+  `yt-dlp` is bootstrapped and self-updated by the app, so YouTube
   breaking old builds heals itself.
 - **Crates** — manual folders plus smart crates (rules on BPM, key, genre, play count, …). Use the **Most played** rule after importing Mixxx play counts or pressing a song’s `+1` button;
   one-click sync of a crate into Mixxx. Mixxx play counts can be imported from Settings without changing Mixxx’s database.
@@ -58,9 +58,9 @@ a `rekordbox.xml` file instead — see [Syncing with your DJ software](#syncing-
 
 ## For complete beginners — install from scratch
 
-This section explains **every** step, assuming you've never used GitHub or a
-terminal before. Read each step, copy the command into the **Terminal** app
-(`Applications → Utilities → Terminal`), and press Enter.
+This section explains **every** step — no GitHub or terminal experience needed.
+For each step, copy the command into the **Terminal** app
+(`Applications → Utilities → Terminal`) and press Enter.
 
 ### What is GitHub, and what are we doing?
 
@@ -68,8 +68,8 @@ terminal before. Read each step, copy the command into the **Terminal** app
 (the plain-text instructions that make up the app). This project's code lives
 at **https://github.com/5d2dm5mxh8-cpu/dj-library**.
 
-We're going to:
-1. copy the code from GitHub onto your computer,
+Here's the plan:
+1. download the app's code onto your computer,
 2. install the two helper programs it needs (Python and ffmpeg),
 3. tell the app where your music is (one small text file),
 4. start it — it then runs in the background on your Mac forever.
@@ -79,30 +79,39 @@ You don't need a GitHub account to download or run it. (If you ever want to,
 
 ### The quick way (one double-click)
 
-If the autor has shared a pre-built `install.command` file with you (or you
-downloaded the ZIP and see `install.command` inside the `dj-library-main`
-folder):
+The app comes with a helper file called **`install.command`** that does almost
+everything for you. Depending on how you got it:
 
-1. Put `install.command` inside the `dj-library-main` folder you unzipped
-   (`~/Downloads/dj-library-main`).
-2. **Double-click `install.command`.** macOS may ask “open programs downloaded
-   from the internet?” — click *Open*. It downloads the code you're reading
-   right now, installs the small Python packages it needs, creates the settings
-   file, starts the app in the background, and opens it in your browser in one
-   go. You only need to do Step 2 (install Python) and Step 4 (install ffmpeg)
-   below first — and only once.
+- **You downloaded the ZIP** (green **Code** button → **Download ZIP**): you'll
+  find `install.command` inside the unzipped `dj-library-main` folder
+  (probably `~/Downloads/dj-library-main`).
+- **Someone shared `install.command` with you directly**: put it anywhere handy
+  (say, `~/Downloads`). The script downloads the app's code itself, so you
+  don't need the ZIP at all.
 
-The rest of this section is the fully-manual route, so you understand exactly
-what's happening.
+Then just **double-click `install.command`**. macOS may ask “open programs
+downloaded from the internet?” — click *Open*. It installs the small Python
+packages the app needs, creates the settings file, starts the app in the
+background, and opens it in your browser — all in one go.
 
-### Step 1 — Download the code
+Two things it can't install for you, and only once each: **Python** (Step 2)
+and **ffmpeg** (Step 4). If either is missing, the script will tell you — or
+just do them first using the steps below.
 
-You have two options; pick one:
+Prefer to know exactly what's happening under the hood? The rest of this
+section walks through every step by hand.
 
-- **Easy (no terminal):** on the GitHub page, click the green **Code** button
-  → **Download ZIP**. Your browser downloads `dj-library-main.zip`. Double-click
-  it in Finder to unzip. Open the resulting `dj-library-main` folder.
-- **With the terminal (allows easy updates later):**
+### Step 1 — Download the app's code
+
+What you're downloading is simply a folder of files — the app's code. You only
+do this once. Pick whichever option feels easier:
+
+- **Easy (no terminal):** open https://github.com/5d2dm5mxh8-cpu/dj-library in
+  your browser and click the green **Code** button → **Download ZIP**. Your
+  browser saves `dj-library-main.zip` to your Downloads folder. Double-click
+  the ZIP in Finder to unzip it — you now have a `dj-library-main` folder
+  containing the whole app.
+- **With the terminal (makes updating easier later):**
   ```bash
   cd ~/Downloads
   git clone https://github.com/5d2dm5mxh8-cpu/dj-library.git
@@ -111,8 +120,9 @@ You have two options; pick one:
   (If `git` isn't installed, macOS offers to install Xcode Command Line Tools
   the first time you use it — click **Install** and wait a few minutes.)
 
-From now on these instructions assume your copy is in
-`~/Downloads/dj-library` (adjust the path if you unzipped elsewhere).
+The steps below assume your copy lives in `~/Downloads/dj-library` — if you
+unzipped somewhere else (or your folder is called `dj-library-main`), just use
+your folder's path instead.
 
 ### Step 2 — Install Python 3.11+
 
@@ -218,7 +228,7 @@ automatically. Open **http://localhost:3000** whenever you want it.
 
 ### Updating the app
 
-The app improves over time. To get the latest version:
+New versions land on GitHub from time to time. To update your copy:
 
 ```bash
 cd ~/Downloads/dj-library
@@ -264,7 +274,7 @@ Smart crates can also use **Most played** (`play_count ≥ N`) or **Least played
 
 ## Spotify setup (optional, for the downloader)
 
-To enable the downloader: log in at
+Want the Spotify-powered downloader? Here's how to switch it on: log in at
 https://developer.spotify.com/dashboard → *Create app* → copy the Client ID /
 Client Secret into `config.json`. Leave them empty to run without Spotify
 features (the app prints a warning at startup).
