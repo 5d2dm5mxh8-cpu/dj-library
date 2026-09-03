@@ -109,6 +109,7 @@ print(json.dumps(v) if v else 'null')
 
   STATUS=$(echo "$RESPONSE" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('status','unknown'))" 2>/dev/null)
   TITLE=$(echo "$RESPONSE" | python3 -c "import json,sys; d=json.load(sys.stdin); t=d.get('track',{}); print(t.get('title','') if t else d.get('query',''))" 2>/dev/null)
+  ERROR_MSG=$(echo "$RESPONSE" | python3 -c "import json,sys; print(json.load(sys.stdin).get('error',''))" 2>/dev/null)
   TOTAL=$(echo "$RESPONSE" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('total',''))" 2>/dev/null)
   MISSING=$(echo "$RESPONSE" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('downloading',''))" 2>/dev/null)
   OWNED=$(echo "$RESPONSE" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('already_have',''))" 2>/dev/null)
@@ -119,7 +120,7 @@ print(json.dumps(v) if v else 'null')
   elif [ "$STATUS" = "queued" ]; then
     osascript -e "display notification \"${TITLE:-$INPUT}\" with title \"⬇️ Downloading…\""
   elif [ "$STATUS" = "failed" ]; then
-    osascript -e "display notification \"Could not download\" with title \"❌ spotify-dl\""
+    osascript -e "display notification \"${ERROR_MSG:-Could not download}\" with title \"❌ spotify-dl\""
   else
     osascript -e "display notification \"Could not connect to DJ Library\" with title \"❌ spotify-dl\""
   fi
