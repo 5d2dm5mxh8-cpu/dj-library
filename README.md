@@ -345,8 +345,8 @@ writable database at all. The XML route is the safe, version-proof standard.
 
 Use [Raycast](https://www.raycast.com)? The included `raycast/spotify-dl.sh`
 script downloads a song in a few keystrokes — paste a Spotify link, a song
-name, or a whole pasted list of Spotify track URLs, plus an optional
-subfolder and crate name. Name a crate that doesn't exist yet and the script
+name, a whole pasted list of Spotify track URLs, or a Spotify playlist link
+(the full playlist downloads), plus an optional subfolder and crate name. Name a crate that doesn't exist yet and the script
 **creates it** (as a manual crate) and downloads into it; naming a smart crate
 shows a warning instead, since downloads can't be added to one.
 
