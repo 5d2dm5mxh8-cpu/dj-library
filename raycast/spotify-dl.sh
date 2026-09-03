@@ -89,6 +89,11 @@ print(json.dumps(v) if v else 'null')
     -H "Content-Type: application/json" \
     -d "{\"urls\": $URLS_JSON, \"subfolder\": $SUBFOLDER_JSON, \"crate_id\": $CRATE_ID}")
 
+  BATCH_ID=$(echo "$RESPONSE" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+print(d.get('batch_id',''))
+" 2>/dev/null)
   TOTAL=$(echo "$RESPONSE" | python3 -c "
 import json,sys
 d=json.load(sys.stdin)
@@ -96,6 +101,33 @@ print(d.get('total','?'))
 " 2>/dev/null)
 
   osascript -e "display notification \"Queued $TOTAL tracks — downloading in background\" with title \"⬇️ spotify-dl\""
+
+  # Live progress: poll the batch status and notify whenever the processed
+  # count moves. Stops at the success notification (or after ~100 minutes).
+  if [ -n "$BATCH_ID" ]; then
+    LAST_PROGRESS=0
+    POLLS=0
+    while [ "$POLLS" -lt 600 ]; do
+      sleep 10
+      POLLS=$((POLLS+1))
+      STATUS_JSON=$(curl -s "http://localhost:3000/api/download-status/batch/$BATCH_ID")
+      DONE=$(echo "$STATUS_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin).get('done',0))" 2>/dev/null)
+      DUPE=$(echo "$STATUS_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin).get('duplicate',0))" 2>/dev/null)
+      FAIL=$(echo "$STATUS_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin).get('failed',0))" 2>/dev/null)
+      BSTATUS=$(echo "$STATUS_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin).get('status',''))" 2>/dev/null)
+
+      if [ "$BSTATUS" = "success" ]; then
+        osascript -e "display notification \"Done — $DONE downloaded, $DUPE already owned, $FAIL failed\" with title \"✅ spotify-dl\""
+        break
+      fi
+
+      PROCESSED=$((DONE+DUPE))
+      if [ "$PROCESSED" != "$LAST_PROGRESS" ]; then
+        osascript -e "display notification \"$PROCESSED / $TOTAL tracks processed ($DUPE already owned)\" with title \"⬇️ spotify-dl\""
+        LAST_PROGRESS="$PROCESSED"
+      fi
+    done
+  fi
 
 else
   # --- SINGLE TRACK / SEARCH MODE ---
