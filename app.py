@@ -337,9 +337,15 @@ def auth_logout():
 _token_cache = {'token': None, 'expires': 0}
 
 def get_spotify_token():
+    """Returns a Spotify API token. Prefers the user's OAuth token (the only
+    kind that can read playlists, including private ones); falls back to a
+    client-credentials token (public lookups only) when no user is connected."""
     import time
     if not (SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET):
         return None
+    user_token = get_oauth_token()
+    if user_token:
+        return user_token
     if _token_cache['token'] and time.time() < _token_cache['expires']:
         return _token_cache['token']
     resp = requests.post('https://accounts.spotify.com/api/token',
@@ -388,32 +394,50 @@ def get_track_audio_features(spotify_id):
     return bpm, key
 
 def get_playlist_tracks(spotify_url):
+    """Returns (tracks, playlist_name, status). status is 'ok' when the
+    playlist was read successfully (tracks may still be empty), 'blocked'
+    when Spotify refuses to serve the playlist's tracks to third-party apps
+    (popular or other users' playlists can be off-limits), or 'error'."""
     playlist_id = re.search(r'playlist/([A-Za-z0-9]+)', spotify_url)
-    if not playlist_id: return [], None
+    if not playlist_id: return [], None, 'error'
     token = get_spotify_token()
-    if not token: return [], None
+    if not token: return [], None, 'error'
     meta = requests.get(f'https://api.spotify.com/v1/playlists/{playlist_id.group(1)}?fields=name',
         headers={'Authorization': f'Bearer {token}'}).json()
+    if 'error' in meta: return [], None, 'error'
     playlist_name = meta.get('name','Playlist')
-    tracks, url = [], f'https://api.spotify.com/v1/playlists/{playlist_id.group(1)}/tracks?limit=100'
-    while url:
-        resp = requests.get(url, headers={'Authorization': f'Bearer {token}'})
-        data = resp.json()
-        if 'error' in data: break
-        for item in data.get('items',[]):
-            t = item.get('track')
-            if t and t.get('id'):
-                artists = ', '.join(a['name'] for a in t.get('artists',[]))
-                tracks.append({
-                    'id': t['id'],
-                    'title': t.get('name'),
-                    'artist': artists,
-                    'album': t.get('album',{}).get('name'),
-                    'year': str(t.get('album',{}).get('release_date',''))[:4],
-                    'duration_ms': t.get('duration_ms'),
-                })
-        url = data.get('next')
-    return tracks, playlist_name
+    # Spotify's API now serves playlist tracks from /items, with each entry's
+    # track nested under 'item' (older accounts still use /tracks + 'track').
+    # Try the current endpoint first and fall back to the legacy one.
+    last_status = None
+    for endpoint, track_key in (('items', 'item'), ('tracks', 'track')):
+        url = f'https://api.spotify.com/v1/playlists/{playlist_id.group(1)}/{endpoint}?limit=100'
+        status, tracks = None, []
+        while url:
+            resp = requests.get(url, headers={'Authorization': f'Bearer {token}'})
+            data = resp.json()
+            if 'error' in data:
+                status, tracks = data['error'].get('status'), []
+                break
+            for entry in data.get('items', []):
+                t = entry.get(track_key)
+                if t and t.get('id'):
+                    artists = ', '.join(a['name'] for a in t.get('artists', []))
+                    tracks.append({
+                        'id': t['id'],
+                        'title': t.get('name'),
+                        'artist': artists,
+                        'album': t.get('album', {}).get('name'),
+                        'year': str(t.get('album', {}).get('release_date', ''))[:4],
+                        'duration_ms': t.get('duration_ms'),
+                    })
+            url = data.get('next')
+        if status is None:
+            return tracks, playlist_name, 'ok'
+        last_status = status
+    if last_status == 403:
+        return [], playlist_name, 'blocked'
+    return [], playlist_name, 'error'
 
 # -- BPM / KEY ANALYSIS -------------------------------------------------------
 
@@ -2151,9 +2175,13 @@ def download():
         return jsonify({'status':'failed','error':'Could not fetch Spotify info'})
 
     elif 'open.spotify.com/playlist/' in query:
-        tracks, playlist_name = get_playlist_tracks(query)
+        tracks, playlist_name, fetch_status = get_playlist_tracks(query)
         if not tracks:
-            return jsonify({'status':'failed','error':'Could not fetch playlist'})
+            if fetch_status == 'blocked':
+                return jsonify({'status':'failed','error':"Spotify doesn't allow apps to read this playlist (popular or other users' playlists can be restricted). Copy it into your own Spotify library first, then try again."})
+            if fetch_status == 'error':
+                return jsonify({'status':'failed','error':'Could not fetch playlist'})
+            return jsonify({'status':'failed','error':'Playlist has no downloadable tracks'})
         already_have, missing = [], []
         with get_db() as db:
             for t in tracks:
