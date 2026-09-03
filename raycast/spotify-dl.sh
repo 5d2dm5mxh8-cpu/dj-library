@@ -61,18 +61,21 @@ else:
 fi
 
 # Detect input type:
-# - Multiple lines where every line is a Spotify track URL = list mode
+# - 2+ Spotify track URLs (on any number of lines) = list mode
 # - Single Spotify URL = single track or playlist
 # - Plain text = YouTube search
+# Raycast can collapse a pasted list onto one line, so extract the URLs with
+# grep rather than counting lines.
 
-LINE_COUNT=$(echo "$INPUT" | grep -c "https://open.spotify.com/track/")
-TOTAL_LINES=$(echo "$INPUT" | grep -vc "^$")
+TRACK_URLS=$(echo "$INPUT" | grep -o "https://open.spotify.com/track/[A-Za-z0-9]*")
+URL_COUNT=$(echo "$TRACK_URLS" | sed '/^$/d' | wc -l | tr -d ' ')
 
-if [ "$LINE_COUNT" -gt 1 ] && [ "$LINE_COUNT" -eq "$TOTAL_LINES" ]; then
+if [ "$URL_COUNT" -gt 1 ]; then
   # --- SPOTIFY TRACK LIST MODE ---
-  # Multiple Spotify track URLs pasted at once (e.g. copied from a playlist)
-  # We send them all to the batch endpoint which processes them one by one
-  URLS_JSON=$(echo "$INPUT" | python3 -c "
+  # Multiple Spotify track URLs pasted at once (e.g. copied from a playlist),
+  # whether they arrive on separate lines or all on one line. We send them
+  # all to the batch endpoint which processes them one by one.
+  URLS_JSON=$(echo "$TRACK_URLS" | sed '/^$/d' | python3 -c "
 import sys, json
 lines = [l.strip() for l in sys.stdin.read().splitlines() if l.strip()]
 print(json.dumps(lines))
