@@ -341,6 +341,30 @@ Writing directly into Rekordbox's own database is deliberately not supported —
 its schema is undocumented and changes between versions, and Serato has no
 writable database at all. The XML route is the safe, version-proof standard.
 
+## Raycast quick download (optional)
+
+Use [Raycast](https://www.raycast.com)? The included `raycast/spotify-dl.sh`
+script downloads a song in a few keystrokes — paste a Spotify link, a song
+name, or a whole pasted list of Spotify track URLs, plus an optional
+subfolder and crate name. Name a crate that doesn't exist yet and the script
+**creates it** (as a manual crate) and downloads into it; naming a smart crate
+shows a warning instead, since downloads can't be added to one.
+
+To install:
+
+1. Copy the script into your Raycast scripts folder:
+   ```bash
+   mkdir -p ~/.raycast-scripts
+   cp raycast/spotify-dl.sh ~/.raycast-scripts/
+   ```
+2. In Raycast, open **Extensions → Scripts → Add Script Directory** and pick
+   `~/.raycast-scripts`.
+3. Run **spotify-dl**, paste your input, then optionally a subfolder and a
+   crate name.
+
+The script talks to the app's API on `localhost:3000`, so the DJ Library app
+must be running (it is, if you installed the LaunchAgent).
+
 ## Security
 
 - `config.json` and `spotify_oauth.json` contain credentials (Spotify client
@@ -354,4 +378,5 @@ app.py               Flask backend (API, scanning, downloader, DJ-software sync)
 static/index.html    Single-page frontend (no build step)
 install.sh           LaunchAgent installer for auto-start
 config.example.json  Sanitized config template
+raycast/spotify-dl.sh  Raycast script: quick download with crate auto-create
 ```
