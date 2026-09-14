@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>DJ Library</title>
 <meta name="description" content="Self-hosted DJ music library manager">
-<meta name="theme-color" content="#0d0d0f" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#202128" media="(prefers-color-scheme: dark)">
 <meta name="theme-color" content="#f5f6fa" media="(prefers-color-scheme: light)">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
@@ -36,36 +36,32 @@
 <style>
 :root{
   color-scheme:dark;
-  /* ---- Liquid-glass palette (dark): the aurora glows through translucent chrome ---- */
-  --bg:#0a0a10;
-  --bg-a:rgba(56,226,255,.10);   /* aurora stop 1 */
-  --bg-b:rgba(59,130,246,.14);   /* aurora stop 2 */
-  --bg-c:rgba(191,90,242,.10);   /* aurora stop 3 */
+  /* ---- Matte rack palette (dark): one chrome tone for every control band,
+     hairlines instead of surface steps, zero gradients -- low glare for a
+     dark booth. Colour is reserved for data (BPM, key, playing row). ---- */
+  --bg:#15161d;
 
-  --surface:rgba(26,26,32,.62);        /* glass chrome */
-  --surface-solid:#1a1a20;             /* opaque fallback (reduced transparency) */
-  --surface2:rgba(48,48,58,.55);       /* raised / hover */
-  --surface3:#2c2c34;
+  --surface:#202128;                   /* chrome: header, filter bar, sidebar, floating bars */
+  --surface-solid:#202128;             /* opaque fallback */
+  --surface2:#2a2b33;                  /* raised / hover on chrome */
+  --surface3:#33343d;                  /* small wells on the content field */
 
-  --glass-hi:rgba(255,255,255,.16);    /* specular top rim */
-  --glass-hi-2:rgba(255,255,255,.05);  /* faint lower rim */
+  --chip:rgba(255,255,255,.09);        /* inputs, chips, ghost buttons */
+  --chip-2:rgba(255,255,255,.15);      /* hovered chip */
+  --hover:rgba(255,255,255,.07);       /* row hover */
+  --track:rgba(255,255,255,.17);       /* slider track */
+  --selbar:#202128;                    /* floating selection bar */
+  --th-bg:#202128;                     /* sticky table header */
+  --modal-bg:#24252c;                  /* modal material */
+  --scrim:rgba(0,0,0,.48);
+  --row-border:rgba(255,255,255,.06);
+  --dg:rgba(255,255,255,.055);         /* dupe / tool cards */
+  --dgl:rgba(0,0,0,.12);
+  --scroll:rgba(255,255,255,.20);
+  --scroll-2:rgba(255,255,255,.32);
 
-  --chip:rgba(255,255,255,.06);        /* inputs, chips, ghost buttons */
-  --chip-2:rgba(255,255,255,.10);      /* hovered chip */
-  --hover:rgba(255,255,255,.04);       /* row hover */
-  --track:rgba(255,255,255,.13);       /* slider track */
-  --selbar:rgba(22,22,28,.82);         /* floating selection bar */
-  --th-bg:rgba(14,14,18,.70);          /* sticky table header */
-  --modal-bg:rgba(28,28,34,.86);       /* modal material */
-  --scrim:rgba(0,0,0,.5);
-  --row-border:rgba(255,255,255,.05);
-  --dg:rgba(255,255,255,.035);         /* dupe / tool cards */
-  --dgl:rgba(0,0,0,.22);
-  --scroll:rgba(255,255,255,.14);
-  --scroll-2:rgba(255,255,255,.24);
-
-  --border:rgba(255,255,255,.08);
-  --border-strong:rgba(255,255,255,.16);
+  --border:rgba(255,255,255,.14);
+  --border-strong:rgba(255,255,255,.26);
 
   --cyan:#38e2ff; --cyan-dim:rgba(56,226,255,.13); --on-accent:#04121a;
   --red:#ff453a;  --red-dim:rgba(255,69,58,.15);
@@ -81,23 +77,18 @@
   --mono:ui-monospace,'SF Mono','JetBrains Mono','Fira Mono','Menlo',monospace;
 
   --r:8px;
-  --shadow-3:0 24px 60px rgba(0,0,0,.55);
+  --shadow-3:0 20px 48px rgba(0,0,0,.38);    /* modal sheet */
+  --shadow-float:0 8px 24px rgba(0,0,0,.30); /* bars, menus, toasts */
 }
 [data-theme="light"]{
   color-scheme:light;
-  /* ---- Liquid-glass palette (light) ---- */
+  /* ---- Matte rack palette (light): mirrors the dark structure ---- */
   --bg:#e6e9f0;
-  --bg-a:rgba(56,190,255,.30);
-  --bg-b:rgba(88,110,240,.22);
-  --bg-c:rgba(190,110,255,.20);
 
   --surface:rgba(255,255,255,.60);
   --surface-solid:#f2f3f7;
   --surface2:rgba(255,255,255,.85);
   --surface3:#ffffff;
-
-  --glass-hi:rgba(255,255,255,.95);
-  --glass-hi-2:rgba(0,0,0,.04);
 
   --chip:rgba(0,0,0,.045);
   --chip-2:rgba(0,0,0,.08);
@@ -125,7 +116,8 @@
   --text:#1a1a1f; --text2:rgba(26,26,31,.82);
   --muted:#5d5d66; --muted2:#909099;
 
-  --shadow-3:0 24px 60px rgba(40,50,80,.28);
+  --shadow-3:0 20px 48px rgba(40,50,80,.22);
+  --shadow-float:0 8px 24px rgba(40,50,80,.16);
 }
 *{box-sizing:border-box;margin:0;padding:0}
 ::selection{background:rgba(56,226,255,.28)}
@@ -137,36 +129,18 @@ body{
   grid-template-columns:var(--sidebar-w,288px) 7px 1fr;
   grid-template-areas:"header header header""filters filters filters""sidebar gutter main";
   overflow:hidden;
-  /* aurora -- animated colour field behind the glass */
-  background:
-    radial-gradient(1100px 700px at 12% -10%,var(--bg-a),transparent 55%),
-    radial-gradient(1200px 800px at 90% -6%,var(--bg-b),transparent 58%),
-    radial-gradient(900px 700px at 30% 115%,var(--bg-c),transparent 55%),
-    var(--bg);
-  background-size:140% 140%,150% 150%,130% 130%,100% 100%;
-  background-repeat:no-repeat;
-}
-@media (prefers-reduced-motion:no-preference){
-  body{animation:aurora 40s ease-in-out infinite alternate}
-}
-@keyframes aurora{
-  0%{background-position:0% 0%,100% 0%,0% 100%,0 0}
-  50%{background-position:60% 20%,40% 30%,70% 60%,0 0}
-  100%{background-position:20% 40%,80% 10%,30% 80%,0 0}
+  background:var(--bg);
 }
 
-/* HEADER -- liquid glass; the aurora glows through and the specular rim reads as an edge */
+/* HEADER -- flat chrome band; the hairline underneath is the only edge */
 header{grid-area:header;
   background-color:var(--surface);
-  background-image:linear-gradient(180deg,var(--glass-hi),transparent 55%);
-  -webkit-backdrop-filter:blur(28px) saturate(180%);backdrop-filter:blur(28px) saturate(180%);
   border-bottom:1px solid var(--border);
-  box-shadow:inset 0 1px 0 var(--glass-hi),0 1px 24px rgba(0,0,0,.14);
   display:flex;align-items:center;padding:0 16px;gap:14px}
 .logo{display:flex;align-items:center;gap:10px;font-family:var(--mono);font-size:13px;font-weight:800;
   letter-spacing:.16em;color:var(--text);text-transform:uppercase;white-space:nowrap;flex-shrink:0}
 .logo::before{content:"";width:22px;height:22px;border-radius:7px;flex-shrink:0;
-  background:linear-gradient(135deg,#38e2ff,#3b82f6);box-shadow:0 2px 10px rgba(56,226,255,.4)}
+  background:var(--cyan)}
 .logo span{color:var(--muted2);font-weight:400}
 .search-wrap{flex:1;max-width:420px;position:relative}
 .search-wrap input{width:100%;background:var(--chip);border:1px solid var(--border);
@@ -199,16 +173,14 @@ header .rule-sel:focus{border-color:var(--cyan);box-shadow:0 0 0 3px var(--cyan-
   padding:0 12px;height:34px;cursor:pointer;transition:all .15s;align-items:center;flex-shrink:0}
 .pwa-install:hover{background:var(--cyan);color:#0d0d0f}
 
-/* selection toolbar -- floating glass bar that drops in over the content,
+/* selection toolbar -- floating bar that drops in over the content,
    so selecting songs never shoves the layout around */
 .selection-bar{
   position:absolute;top:60px;left:16px;right:16px;z-index:40;
   display:flex;align-items:center;gap:8px;padding:8px 10px;
   background-color:var(--selbar);
-  background-image:linear-gradient(180deg,var(--glass-hi),transparent 60%);
-  -webkit-backdrop-filter:blur(22px) saturate(180%);backdrop-filter:blur(22px) saturate(180%);
   border:1px solid rgba(56,226,255,.32);border-radius:12px;
-  box-shadow:0 10px 32px rgba(0,0,0,.5),inset 0 1px 0 var(--glass-hi);
+  box-shadow:var(--shadow-float);
   font-family:var(--mono);font-size:11px;color:var(--cyan);
   opacity:0;transform:translateY(-12px);pointer-events:none;
   transition:opacity .18s ease,transform .24s cubic-bezier(.34,1.56,.64,1);
@@ -227,15 +199,13 @@ header .rule-sel:focus{border-color:var(--cyan);box-shadow:0 0 0 3px var(--cyan-
   border-radius:8px;transition:color .15s}
 .btn-clear:hover{color:var(--text)}
 
-/* PREVIEW PLAYER -- floating glass dock over the bottom of the main area.
+/* PREVIEW PLAYER -- floating dock over the bottom of the main area.
    Appears when a track is previewing; streams via /api/songs/<id>/audio. */
 .player-bar{position:fixed;left:calc(var(--sidebar-w,288px) + 7px + 16px);right:16px;bottom:14px;
   z-index:45;display:flex;align-items:center;gap:10px;padding:8px 12px;
   background-color:var(--selbar);
-  background-image:linear-gradient(180deg,var(--glass-hi),transparent 60%);
-  -webkit-backdrop-filter:blur(22px) saturate(180%);backdrop-filter:blur(22px) saturate(180%);
   border:1px solid rgba(56,226,255,.32);border-radius:12px;
-  box-shadow:0 10px 32px rgba(0,0,0,.5),inset 0 1px 0 var(--glass-hi);
+  box-shadow:var(--shadow-float);
   opacity:0;transform:translateY(16px);pointer-events:none;
   transition:opacity .18s ease,transform .24s cubic-bezier(.34,1.56,.64,1)}
 .player-bar.visible{opacity:1;transform:none;pointer-events:auto}
@@ -246,7 +216,7 @@ header .rule-sel:focus{border-color:var(--cyan);box-shadow:0 0 0 3px var(--cyan-
 .pb-btn:hover{background:var(--cyan-dim);border-color:var(--cyan);color:var(--cyan)}
 .pb-btn:active{transform:scale(.92)}
 .pb-main{width:34px;height:34px;border-radius:50%;background:var(--cyan);color:var(--on-accent);
-  border:none;font-size:13px;box-shadow:0 2px 10px rgba(56,226,255,.28)}
+  border:none;font-size:13px}
 .pb-main:hover{background:var(--cyan);color:var(--on-accent);opacity:.92}
 .pb-close:hover{background:var(--red-dim);border-color:var(--red);color:var(--red)}
 .pb-meta{min-width:0;flex:0 1 220px}
@@ -261,7 +231,7 @@ header .rule-sel:focus{border-color:var(--cyan);box-shadow:0 0 0 3px var(--cyan-
 .pb-seek:hover{background:var(--border-strong)}
 .pb-seek::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;
   border-radius:50%;background:#fff;border:2px solid var(--cyan);
-  box-shadow:0 1px 5px rgba(0,0,0,.45);cursor:grab;transition:transform .12s}
+  box-shadow:0 1px 4px rgba(0,0,0,.30);cursor:grab;transition:transform .12s}
 .pb-seek::-webkit-slider-thumb:hover{transform:scale(1.15)}
 .pb-seek::-webkit-slider-thumb:active{cursor:grabbing;transform:scale(1.3)}
 /* currently-playing row gets the accent treatment, like DJ software */
@@ -272,11 +242,9 @@ header .rule-sel:focus{border-color:var(--cyan);box-shadow:0 0 0 3px var(--cyan-
 .toast{position:fixed;left:16px;bottom:14px;z-index:80;display:flex;align-items:center;gap:8px;
   max-width:340px;padding:9px 14px;
   background-color:var(--selbar);
-  background-image:linear-gradient(180deg,var(--glass-hi),transparent 60%);
-  -webkit-backdrop-filter:blur(22px) saturate(180%);backdrop-filter:blur(22px) saturate(180%);
   border:1px solid var(--border-strong);border-radius:10px;
   font-family:var(--mono);font-size:11px;color:var(--text);
-  box-shadow:0 10px 32px rgba(0,0,0,.5),inset 0 1px 0 var(--glass-hi);
+  box-shadow:var(--shadow-float);
   opacity:0;transform:translateY(10px);pointer-events:none;
   transition:opacity .2s ease,transform .25s cubic-bezier(.34,1.56,.64,1)}
 .toast.visible{opacity:1;transform:none}
@@ -291,10 +259,8 @@ header .rule-sel:focus{border-color:var(--cyan);box-shadow:0 0 0 3px var(--cyan-
 /* CONTEXT MENU -- right-click on the library when songs are selected */
 .ctx-menu{position:fixed;z-index:90;display:none;flex-direction:column;min-width:240px;padding:4px;
   background-color:var(--selbar);
-  background-image:linear-gradient(180deg,var(--glass-hi),transparent 60%);
-  -webkit-backdrop-filter:blur(22px) saturate(180%);backdrop-filter:blur(22px) saturate(180%);
   border:1px solid var(--border-strong);border-radius:10px;
-  box-shadow:0 10px 32px rgba(0,0,0,.5),inset 0 1px 0 var(--glass-hi)}
+  box-shadow:var(--shadow-float)}
 .ctx-menu.open{display:flex}
 .ctx-item{background:none;border:none;color:var(--text2);font-family:var(--mono);font-size:11px;
   text-align:left;padding:8px 10px;border-radius:7px;cursor:pointer;transition:background .12s,color .12s}
@@ -319,11 +285,9 @@ header .rule-sel:focus{border-color:var(--cyan);box-shadow:0 0 0 3px var(--cyan-
 .cu-new{color:var(--text);word-break:break-word}
 .cu-new.changed{color:var(--green)}
 
-/* FILTER BAR -- translucent glass, content can scroll under it */
+/* FILTER BAR -- same chrome as the header: one continuous rack */
 .filter-bar{grid-area:filters;
   background-color:var(--surface);
-  background-image:linear-gradient(180deg,var(--glass-hi),transparent 50%);
-  -webkit-backdrop-filter:blur(22px) saturate(180%);backdrop-filter:blur(22px) saturate(180%);
   border-bottom:1px solid var(--border);
   display:flex;align-items:center;gap:16px;padding:0 16px;overflow-x:auto;scrollbar-width:none}
 .filter-bar::-webkit-scrollbar{display:none}
@@ -338,7 +302,7 @@ input[type=range]{-webkit-appearance:none;appearance:none;width:84px;height:4px;
 input[type=range]:hover{background:var(--border-strong)}
 input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;
   border-radius:50%;background:#fff;border:2px solid var(--cyan);
-  box-shadow:0 1px 5px rgba(0,0,0,.45);cursor:grab;transition:transform .12s}
+  box-shadow:0 1px 4px rgba(0,0,0,.30);cursor:grab;transition:transform .12s}
 input[type=range]::-webkit-slider-thumb:hover{transform:scale(1.15)}
 input[type=range]::-webkit-slider-thumb:active{cursor:grabbing;transform:scale(1.3)}
 .fdiv{width:1px;height:26px;background:var(--border);flex-shrink:0}
@@ -362,13 +326,10 @@ input[type=range]::-webkit-slider-thumb:active{cursor:grabbing;transform:scale(1
 .reset-btn:hover{background:var(--red);color:var(--on-accent)}
 .reset-btn:active{transform:scale(.95)}
 
-/* SIDEBAR -- liquid glass panel, thicker material = structural region */
+/* SIDEBAR -- same chrome band as the header; the hairline divides them */
 aside{grid-area:sidebar;
   background-color:var(--surface);
-  background-image:linear-gradient(180deg,var(--glass-hi),transparent 40%);
-  -webkit-backdrop-filter:blur(28px) saturate(180%);backdrop-filter:blur(28px) saturate(180%);
   border-right:1px solid var(--border);
-  box-shadow:inset 1px 0 0 var(--glass-hi-2);
   display:flex;flex-direction:column;overflow:hidden}
 
 /* SIDEBAR RESIZER -- thin drag strip on the sidebar's right edge. Width is
@@ -397,8 +358,7 @@ aside{grid-area:sidebar;
 .fi:focus{border-color:var(--cyan);box-shadow:0 0 0 3px var(--cyan-dim)}
 .btn{background:var(--cyan);color:var(--on-accent);border:none;border-radius:8px;
   font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.06em;
-  padding:7px 14px;cursor:pointer;transition:all .15s;white-space:nowrap;
-  box-shadow:0 2px 10px rgba(56,226,255,.28)}
+  padding:7px 14px;cursor:pointer;transition:all .15s;white-space:nowrap}
 .btn:hover{opacity:.92;transform:translateY(-.5px)}
 .btn:active{transform:scale(.94)}
 .sp{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10.5px;
@@ -445,6 +405,11 @@ body[data-sw="none"] .mixxx-only{display:none!important}
 
 /* folder/crate list */
 .nav-list{display:flex;flex-direction:column;gap:2px;padding:12px}
+/* section headers inside the crate list: manual and smart crates are shown
+   as separate labelled groups */
+.crate-section-label{font-family:var(--mono);font-size:10px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--muted);padding:12px 10px 4px}
+.crate-section-label+.crate-section-label{margin-top:8px}
 .nav-item{background:transparent;border:none;color:var(--muted);font-family:var(--mono);
   font-size:11.5px;padding:8px 10px;border-radius:8px;cursor:pointer;
   text-align:left;transition:all .15s;display:flex;align-items:center;
@@ -459,6 +424,14 @@ body[data-sw="none"] .mixxx-only{display:none!important}
 .nav-item-sync:hover{color:#1ed760;background:rgba(30,215,96,.12)}
 .crate-badge{font-size:9px;padding:2px 6px;border-radius:100px;
   border:1px solid rgba(191,90,242,.45);color:var(--purple);flex-shrink:0}
+/* drag & drop: a crate that accepts a song drop lights up. Manual crates get
+   the purple "add song" glow; smart crates get a green "tag this song" glow
+   (dropping asks to add the crate's genre tags to the song). */
+.nav-item.drop-target{background:var(--purple-dim);color:var(--purple);
+  box-shadow:inset 0 0 0 1.5px var(--purple)}
+.nav-item.drop-target-tag{background:rgba(30,215,96,.12);color:#1ed760;
+  box-shadow:inset 0 0 0 1.5px #1ed760}
+.song-row.dragging{opacity:.45}
 
 .btn-ghost{background:var(--chip);color:var(--text2);border:1px solid var(--border);
   border-radius:9px;font-family:var(--mono);font-size:11.5px;
@@ -480,7 +453,8 @@ body[data-sw="none"] .mixxx-only{display:none!important}
 .spotify-btn:active{transform:scale(.95)}
 .dupe-count{font-family:var(--mono);font-size:22px;font-weight:700;color:var(--red);
   margin-bottom:2px;font-variant-numeric:tabular-nums}
-.dupe-sub{font-size:11.5px;color:var(--muted);margin-bottom:8px}/* MAIN TABLE -- rows scroll underneath the sticky glass header and blur as they pass */
+.dupe-sub{font-size:11.5px;color:var(--muted);margin-bottom:8px}/* MAIN TABLE -- content field; the sticky header is the same chrome as the
+   top bands, so the whole frame reads as one rack */
 main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width:0}
 .song-list{flex:1;overflow-y:auto;position:relative;scrollbar-width:thin;
   scrollbar-color:var(--scroll) transparent}
@@ -495,10 +469,7 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
   grid-template-columns:var(--row-grid, 20px 32px minmax(140px,1fr) 100px 58px 64px 60px 56px 56px 92px);
   padding:0 14px;height:36px;align-items:center;
   background-color:var(--th-bg);
-  background-image:linear-gradient(180deg,var(--glass-hi),transparent 60%);
-  -webkit-backdrop-filter:blur(20px) saturate(180%);backdrop-filter:blur(20px) saturate(180%);
   border-bottom:1px solid var(--border);
-  box-shadow:inset 0 1px 0 var(--glass-hi);
 }
 .col{font-family:var(--mono);font-size:10px;letter-spacing:.09em;color:var(--muted);
   text-transform:uppercase;cursor:pointer;display:flex;align-items:center;gap:3px;
@@ -582,27 +553,19 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
   flex:1;gap:10px;color:var(--muted)}
 .empty-icon{font-size:36px;margin-bottom:4px;opacity:.45}
 
-/* MODALS -- liquid glass sheets that arrive with springy physics + a sheen sweep */
+/* MODALS -- opaque sheets that arrive with springy physics */
 .modal-bd{display:none;position:fixed;inset:0;background:var(--scrim);
-  -webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);
+
   z-index:100;align-items:center;justify-content:center;padding:24px}
 .modal-bd.open{display:flex;animation:scrimIn .22s ease}
 @keyframes scrimIn{from{opacity:0}to{opacity:1}}
 .modal{position:relative;
   background-color:var(--modal-bg);
-  background-image:linear-gradient(180deg,var(--glass-hi),transparent 26%);
-  -webkit-backdrop-filter:blur(36px) saturate(180%);backdrop-filter:blur(36px) saturate(180%);
   border:1px solid var(--border-strong);border-radius:18px;
   width:580px;max-height:86vh;display:flex;flex-direction:column;overflow:hidden;
-  box-shadow:var(--shadow-3),inset 0 1px 0 var(--glass-hi);
+  box-shadow:var(--shadow-3);
   animation:modalIn .4s cubic-bezier(.34,1.56,.64,1)}
-.modal::after{content:"";position:absolute;inset:0;pointer-events:none;border-radius:inherit;
-  background:linear-gradient(115deg,transparent 34%,rgba(255,255,255,.13) 48%,transparent 62%);
-  transform:translateX(-120%)}
-[data-theme="light"] .modal::after{
-  background:linear-gradient(115deg,transparent 34%,rgba(0,0,0,.07) 48%,transparent 62%)}
-.modal-bd.open .modal::after{animation:sheen 1s ease .2s}
-@keyframes sheen{to{transform:translateX(120%)}}
+/* modal sheen removed: surfaces are now opaque, no translucent sweep */
 .modal-w{width:680px}
 @keyframes modalIn{from{opacity:0;transform:scale(.96) translateY(14px)}to{opacity:1;transform:none}}
 .mhdr{padding:18px 22px 14px;border-bottom:1px solid var(--border);
@@ -629,7 +592,7 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
   border-top:1px solid var(--border);background:var(--hover)}
 .btn-save{background:var(--cyan);color:var(--on-accent);border:none;border-radius:9px;
   font-family:var(--mono);font-size:11px;font-weight:700;padding:8px 18px;
-  cursor:pointer;transition:all .15s;box-shadow:0 2px 10px rgba(56,226,255,.25)}
+  cursor:pointer;transition:all .15s}
 .btn-save:hover{opacity:.92;transform:translateY(-.5px)}
 .btn-save:active{transform:scale(.95)}
 .batch-note{font-family:var(--mono);font-size:10px;color:var(--yellow);
@@ -754,6 +717,10 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
 .ts-tab-target.noclick{cursor:default;font-style:italic}
 .ts-tab-target.noclick:hover{color:var(--text2)}
 
+/* transition folders strip in the Transitions tab */
+#transFolderList .nav-item{margin-bottom:2px}
+#transFolderList .nav-item .ts-tab-count{margin-left:auto}
+
 /* brief highlight pulse when jumpToSong lands on a row */
 .song-row.flash{animation:rowFlash 1.3s ease}
 @keyframes rowFlash{0%{background:var(--cyan-dim);box-shadow:inset 0 0 0 1px var(--cyan)}60%{background:var(--cyan-dim)}100%{background:transparent;box-shadow:none}}
@@ -774,7 +741,7 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
   transition:background .22s,border-color .22s,box-shadow .22s}
 .switch-track::after{content:"";position:absolute;top:2px;left:2px;width:19px;height:19px;
   border-radius:50%;background:#fff;
-  box-shadow:0 1px 4px rgba(0,0,0,.4),inset 0 1px 0 rgba(255,255,255,.9);
+  box-shadow:0 1px 3px rgba(0,0,0,.28),inset 0 1px 0 rgba(255,255,255,.9);
   transition:transform .25s cubic-bezier(.34,1.56,.64,1)}
 .switch input:checked+.switch-track{background:var(--green);border-color:var(--green)}
 .switch input:checked+.switch-track::after{transform:translateX(17px)}
@@ -888,7 +855,7 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
       <input type="text" class="fi" id="folderInput" placeholder="Folder (optional)" list="folderSuggestions">
       <datalist id="folderSuggestions"></datalist>
       <button class="btn-ghost" onclick="openFolderPicker('download')" style="flex-shrink:0;width:auto" title="Browse or search for a folder">🔍 Browse…</button>
-      <select class="rule-sel" id="downloadCrateSelect" style="max-width:170px" title="Add downloaded songs to this crate">
+      <select class="rule-sel" id="downloadCrateSelect" style="max-width:170px" title="Add downloaded songs to this crate" onchange="onDownloadCrateChange()">
         <option value="">No crate</option>
       </select>
       <button class="btn" onclick="startDownload()">GET</button>
@@ -917,25 +884,26 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
   <!-- CRATES TAB -->
   <div class="sb-panel" id="tab-crates">
     <div style="padding:10px 14px">
-      <button class="btn-ghost" onclick="openNewCrateModal()">+ New Smart Crate</button>
+      <button class="btn-ghost" onclick="openNewCrateModal()">+ New Crate</button>
     </div>
     <div class="nav-list" id="crateList"></div>
   </div>
 
   <!-- TRANSITIONS TAB -->
-  <div class="sb-panel" id="tab-transitions">
+  <div class="sb-panel" id="tab-transitions" oncontextmenu="onTransPanelContext(event)">
     <div style="padding:10px 14px">
       <button class="btn-ghost" onclick="openAddTransitionModal(null)">⇄ + Add Transition</button>
       <button class="btn-ghost mixxx-only" onclick="syncTransitionsToMixxx()" style="margin-left:6px"
         title="Write each song's outgoing transition notes into its Mixxx comment (Mixxx must be closed)">⇄ Sync to Mixxx comments</button>
       <button class="btn-ghost" onclick="exportTransitionsCsv()" style="margin-left:6px"
         title="Download every transition as a CSV spreadsheet (keys + BPMs included)">⬇ CSV</button>
-      <button class="btn-ghost" onclick="window.open('/api/transitions/setlist','_blank')" style="margin-left:6px"
+      <button class="btn-ghost" onclick="window.open('/api/transitions/setlist','_blank','noopener')" style="margin-left:6px"
         title="Open a print-friendly setlist page (Cmd+P to save as PDF)">🖨 Setlist</button>
       <div class="tool-hint" style="margin-top:8px">Every mix link you've made, grouped by the
-        song it starts from. Click a song to jump to it — or right-click any song in the
-        library for its full transition view.</div>
+        song it starts from. Right-click here (or a folder below) to create, rename or delete
+        transition folders.</div>
     </div>
+    <div class="nav-list" id="transFolderList" style="padding:0 10px 4px"></div>
     <div class="nav-list" id="transitionList" style="padding:0 10px 16px"></div>
   </div>
 
@@ -1036,6 +1004,18 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
           <div class="sw-pills" style="margin:0" id="cleanupConfPills"></div>
         </div>
         <div class="tool-card" style="margin-top:10px">
+          <div class="tool-opt">
+            <div class="tool-opt-text">
+              <div class="tool-opt-name">Auto-clean new downloads</div>
+              <div class="tool-opt-desc">When a song finishes downloading, high-confidence
+                Spotify matches are written straight to its tags automatically — weaker
+                matches stay here for you to review</div>
+            </div>
+            <label class="switch" title="Auto-apply high-confidence metadata on download">
+              <input type="checkbox" id="autoCleanupCheckbox" onchange="saveAutoCleanupMetadata(this)">
+              <span class="switch-track"></span>
+            </label>
+          </div>
           <div class="tool-opt">
             <div class="tool-opt-text">
               <div class="tool-opt-name">Only scan tracks never scanned</div>
@@ -1172,8 +1152,8 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
         <button class="btn-ghost" onclick="openGitHubIssue('bug')">🐞 Report a bug on GitHub</button>
         <div class="tool-hint">Opens a pre-filled new issue on the project's GitHub repository.
           Feature ideas and bug reports land straight where the app is developed.</div>
-        <button class="btn-ghost" onclick="window.open('https://buymeacoffee.com/5d2dm5mxh8','_blank')"
-          title="Support the app's development — opens buymeacoffee.com in a new tab">☕ Buy me a coffee</button>
+        <button class="btn-ghost" onclick="openExternal('https://buymeacoffee.com/5d2dm5mxh8')"
+          title="Support the app's development — opens buymeacoffee.com in your browser">☕ Buy me a coffee</button>
       </div>
 
       <div style="margin-top:18px">
@@ -1213,6 +1193,8 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
     <div class="iacts">
       <button class="btn-ghost" style="width:auto" id="infoFinderBtn"
         onclick="revealInFinder(currentSong?.filepath)">Show in Finder</button>
+      <button class="btn-ghost" style="width:auto;color:var(--purple);border-color:rgba(191,90,242,.45)"
+        onclick="addInfoSongsToCrate()">＋ Add to crate</button>
       <button class="btn-save" onclick="saveInfo()">Save to file</button>
     </div>
   </div>
@@ -1222,7 +1204,7 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
 <div class="modal-bd" id="crateModal">
   <div class="modal">
     <div class="mhdr">
-      <div class="mtitle" style="color:var(--purple)" id="crateModalTitle">New Smart Crate</div>
+      <div class="mtitle" style="color:var(--purple)" id="crateModalTitle">New Crate</div>
       <button class="mclose" onclick="closeCrateModal()">✕</button>
     </div>
     <div class="mbody">
@@ -1231,18 +1213,14 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
         <input class="ii" id="crateName" placeholder="e.g. Morning House" style="width:100%">
       </div>
 
-      <div style="display:flex;gap:16px;margin-bottom:14px;font-family:var(--mono);font-size:11px">
+      <div style="margin-bottom:14px;font-family:var(--mono);font-size:11px">
         <label style="display:flex;align-items:center;gap:5px;cursor:pointer;color:var(--text)">
-          <input type="radio" name="crateType" value="smart" id="crateTypeSmart" checked onchange="toggleCrateType()">
-          Smart (auto-filled by rules)
-        </label>
-        <label style="display:flex;align-items:center;gap:5px;cursor:pointer;color:var(--text)">
-          <input type="radio" name="crateType" value="manual" id="crateTypeManual" onchange="toggleCrateType()">
-          Manual (you add songs yourself)
+          <input type="checkbox" id="crateTypeSmart" onchange="toggleCrateType()">
+          Smart crate (auto-filled by rules)
         </label>
       </div>
 
-      <div id="smartCrateSection">
+      <div id="smartCrateSection" style="display:none">
         <div class="il" style="text-align:left;margin-bottom:8px;color:var(--muted)">
           Rules — songs must match ALL of these:
         </div>
@@ -1275,11 +1253,11 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
         </div>
       </div>
 
-      <div id="manualCrateSection" style="display:none">
+      <div id="manualCrateSection">
         <div style="font-family:var(--mono);font-size:11px;color:var(--muted);line-height:1.6">
           This crate starts empty. After creating it, select songs in the library
-          (Cmd+click) and use "+ Add to Crate" in the selection bar — or add an
-          entire folder at once from the Library tab.
+          (click the checkbox, or Cmd+click the row) and use "+ Add to Crate" in
+          the selection bar — or add an entire folder at once from the Library tab.
         </div>
       </div>
     </div>
@@ -1326,6 +1304,21 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
         ⚙ Settings.</div>
       <div class="sw-pills" id="introSwPills" style="margin-bottom:14px"></div>
       <div id="introSteps" style="white-space:pre-line;line-height:1.65"></div>
+      <div class="tool-card" style="margin-top:16px">
+        <div class="tool-opt">
+          <div class="tool-opt-text">
+            <div class="tool-opt-name">✨ Auto-clean new downloads — recommended</div>
+            <div class="tool-opt-desc">When a song finishes downloading, its Title / Artist /
+              Album / Genre tags are corrected automatically against Spotify — but only when
+              the match is high-confidence. Anything weaker stays in ⚙ Settings → Cleanup for
+              you to review. Off by default; flip it on here if you want it.</div>
+          </div>
+          <label class="switch" title="Auto-apply high-confidence metadata on download">
+            <input type="checkbox" id="introAutoCleanupCheckbox" onchange="saveAutoCleanupMetadata(this)">
+            <span class="switch-track"></span>
+          </label>
+        </div>
+      </div>
     </div>
     <div class="iacts">
       <button class="btn-ghost" onclick="closeIntroGuide()">Later</button>
@@ -1415,6 +1408,15 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
   <button class="ctx-item" id="ctxScanAll" title="Rescan even tracks already scanned">🔁 Scan selected — everything</button>
   <div class="ctx-sep"></div>
   <button class="ctx-item" id="ctxInfo">ℹ Track info</button>
+</div>
+
+<!-- TRANSITION FOLDER CONTEXT MENU -- right-click in the Transitions tab -->
+<div class="ctx-menu" id="transCtxMenu">
+  <button class="ctx-item" id="tctxNew" title="Create a new folder to group transitions">📁 New folder…</button>
+  <button class="ctx-item" id="tctxRename" style="display:none">✎ Rename folder…</button>
+  <div class="ctx-sep" id="tctxSep" style="display:none"></div>
+  <button class="ctx-item" id="tctxDelete" style="display:none"
+    title="Delete the folder — its transitions move back to All transitions">🗑 Delete folder</button>
 </div>
 
 <!-- TOAST -- small acknowledgment that fades on its own -->
@@ -1544,6 +1546,19 @@ applyAccentForTheme(document.documentElement.getAttribute('data-theme') || 'dark
 // Opens a pre-filled new issue on the project's GitHub repository so feature
 // ideas and bug reports can be sent from inside the app.
 const GITHUB_REPO = 'https://github.com/5d2dm5mxh8-cpu/dj-library';
+// Opens an external URL in the real browser. In an installed (standalone) app
+// window, window.open() tries to spawn another app window, which renders blank
+// for external sites. Creating an anchor click lets the OS hand the URL to the
+// user's actual browser, which is what external links should do.
+function openExternal(url){
+  const a = document.createElement('a');
+  a.href = url;
+  a.target = '_blank';
+  a.rel = 'noopener';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
 function openGitHubIssue(kind){
   let title = '';
   let body = '';
@@ -1560,7 +1575,7 @@ function openGitHubIssue(kind){
   }
   body += '\n*Suggested from the DJ Library app*\n';
   const url = GITHUB_REPO + '/issues/new?title=' + encodeURIComponent(title) + '&body=' + encodeURIComponent(body);
-  window.open(url, '_blank');
+  openExternal(url);
 }
 
 // -- COLUMN REORDERING -------------------------------------------------------
@@ -1822,6 +1837,9 @@ async function init() {
     window.autoSyncMixxxPlays = !cfg || cfg.auto_sync_mixxx_plays !== false;
     window.keyDisplay = (cfg && cfg.key_display) || 'camelot';
     window.autoInstallPython = !cfg || cfg.auto_install_python !== false;   // still honoured by install.command's installer
+    window.autoCleanupMetadata = !!(cfg && cfg.auto_cleanup_metadata);   // off by default
+    const autoCleanupToggle = document.getElementById('autoCleanupCheckbox');
+    if (autoCleanupToggle) autoCleanupToggle.checked = window.autoCleanupMetadata;
     const toggle = document.getElementById('autoSyncMixxxCheckbox');
     if (toggle) toggle.checked = window.autoSyncMixxx;
     const playToggle = document.getElementById('autoSyncMixxxPlaysCheckbox');
@@ -1994,11 +2012,25 @@ async function saveAutoSyncMixxx(){
   }catch(e){ console.error('Save auto-sync failed:',e); }
 }
 
+async function saveAutoCleanupMetadata(el){
+  const on = el ? el.checked : document.getElementById('autoCleanupCheckbox').checked;
+  window.autoCleanupMetadata=on;
+  // Keep the Settings toggle and the onboarding proposal in sync.
+  const other = document.getElementById(el && el.id==='autoCleanupCheckbox' ? 'introAutoCleanupCheckbox' : 'autoCleanupCheckbox');
+  if(other) other.checked=on;
+  try{
+    await fetch('/api/config',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({auto_cleanup_metadata:on})});
+  }catch(e){ console.error('Save auto-cleanup failed:',e); }
+}
+
 // ── INTRO GUIDE (first-run onboarding) ────────────────────────────────────────
 function openIntroGuide(){
   renderSoftwarePills('introSwPills');
   const steps=document.getElementById('introSteps');
   if(steps) steps.textContent=(SOFTWARE[window.djsSoftware]||SOFTWARE.none).steps;
+  const introToggle=document.getElementById('introAutoCleanupCheckbox');
+  if(introToggle) introToggle.checked=!!window.autoCleanupMetadata;
   document.getElementById('introModal').classList.add('open');
 }
 
@@ -2125,14 +2157,19 @@ function setFolder(folder, el) {
 }
 
 // ── CRATES ────────────────────────────────────────────────────────────────────
-async function loadCrates() {
-  const resp = await fetch('/api/crates');
-  const crates = await resp.json();
-  const list = document.getElementById('crateList');
-  window._allCrates = crates;  // cache for the "add to crate" picker
-  list.innerHTML = crates.length ? crates.map(c=>`
+function crateNavItem(c){
+  const smart = c.is_smart ? 1 : 0;
+  return `
     <div class="nav-item ${currentCrate===c.id?'active':''}" id="crate-nav-${c.id}"
-      onclick="selectCrate(${c.id},this)">
+      data-crate-id="${c.id}" data-smart="${smart}"
+      onclick="selectCrate(${c.id},this)"
+      draggable="true"
+      ondragstart="onCrateDragStart(event,${c.id},${smart})"
+      ondragend="onCrateDragEnd(event)"
+      ondragover="onCrateDragOver(event,${c.id},${smart})"
+      ondragleave="onCrateDragLeave(event)"
+      ondrop="onCrateDrop(event,${c.id},${smart},'${esc(c.name).replace(/'/g,"\\'")}')"
+      title="${c.is_smart?'Drop songs here to add matching tags':'Drop songs here to add them'}">
       <span class="nav-item-label">${esc(c.name)}</span>
       <span class="crate-badge">${c.is_smart?'smart':'manual'}</span>
       <button class="nav-item-sync mixxx-only" id="sync-btn-${c.id}"
@@ -2140,10 +2177,30 @@ async function loadCrates() {
       <button class="nav-item-sync" onclick="event.stopPropagation();exportCrateXml(${c.id})"
         title="Export this crate for Rekordbox/Serato/DJUCED">⭳</button>
       <button class="nav-item-del" onclick="event.stopPropagation();deleteCrate(${c.id})" title="Delete">✕</button>
-    </div>`).join('')
-  : `<div class="tool-hint" style="padding:6px 2px;line-height:1.7">No crates yet. Crates are a gig's
-     folders: select songs in the library → <b style="color:var(--text2)">+ Add to Crate</b>, or build a
-     <b style="color:var(--text2)">smart crate</b> that fills itself from rules (BPM, key, genre…).</div>`;
+    </div>`;
+}
+
+async function loadCrates() {
+  const resp = await fetch('/api/crates');
+  const crates = await resp.json();
+  const list = document.getElementById('crateList');
+  window._allCrates = crates;  // cache for the "add to crate" picker
+  if(!crates.length){
+    list.innerHTML = `<div class="tool-hint" style="padding:6px 2px;line-height:1.7">No crates yet. Crates are a gig's
+       folders: select songs in the library → <b style="color:var(--text2)">+ Add to Crate</b>, or build a
+       <b style="color:var(--text2)">smart crate</b> that fills itself from rules (BPM, key, genre…).</div>`;
+  } else {
+    // Manual and smart crates are shown as separate labelled sections -- smart
+    // crates fill themselves from rules, manual ones are the drag-drop targets.
+    let html='';
+    const addSection=(title,items)=>{
+      if(!items.length) return;
+      html += `<div class="crate-section-label">${title}</div>` + items.map(crateNavItem).join('');
+    };
+    addSection('Crates',        crates.filter(c=>!c.is_smart));
+    addSection('Smart crates',   crates.filter(c=> c.is_smart));
+    list.innerHTML = html;
+  }
   populateImportCrateSelect();
   populateDownloadCrateSelect();
 }
@@ -2154,7 +2211,20 @@ function populateDownloadCrateSelect() {
   if (!sel) return;
   const crates = window._allCrates || [];
   sel.innerHTML = '<option value="">No crate</option>' +
-    crates.filter(c => !c.is_smart).map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+    crates.filter(c => !c.is_smart).map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('') +
+    '<option value="__new">＋ Create new crate…</option>';
+}
+
+// "Create new crate…" picked in the download crate dropdown -- remember so
+// saveCrate() can select the freshly-created crate once it exists.
+let pendingDownloadCrate = false;
+function onDownloadCrateChange() {
+  const sel = document.getElementById('downloadCrateSelect');
+  if (sel && sel.value === '__new') {
+    pendingDownloadCrate = true;
+    openNewCrateModal(true);   // manual crate: downloads add songs directly
+    sel.value = '';            // reset now; the new crate is selected after creation
+  }
 }
 
 function populateImportCrateSelect() {
@@ -2522,17 +2592,171 @@ function addFolderToCrate(folderName) {
   openAddToCratePicker(ids);
 }
 
+// -- DRAG & DROP: song → crate, and crate reorder -----------------------------
+// Song rows are HTML5-draggable. Dropping on a MANUAL crate adds the song(s).
+// Dropping on a SMART crate asks whether to add the crate's genre tags to the
+// song(s) so they match its rules -- rules on BPM/key/duration/artist/year/
+// play count can't be "added", only genre can. Dragging a row that's part of a
+// multi-selection carries the whole selection.
+// Crate rows themselves are draggable too: dragging one onto a crate in the
+// SAME manual/smart section reorders the list (persisted to the backend).
+let _dragSongIds = [];
+let _dragCrateId  = null;
+let _dragCrateSmart = 0;
+
+// The genre values a smart crate's rules require ("tags"). Only rules on the
+// genre field qualify -- numeric/identity fields (BPM, key, duration, artist,
+// year, play count) can't be stamped onto a song.
+function parseCrateTags(rulesJson){
+  const seen = new Set();
+  try{
+    return (JSON.parse(rulesJson||'[]')||[])
+      .filter(r=>r && r.field==='genre' && r.value && String(r.value).trim())
+      .map(r=>String(r.value).trim())
+      .filter(t=>{ const k=t.toLowerCase(); if(seen.has(k)) return false; seen.add(k); return true; });
+  }catch(e){ return []; }
+}
+
+// Adds tags to a song's semicolon-separated genre string without duplicating
+// anything it already carries.
+function mergeGenreTags(existing, tags){
+  const parts=(existing||'').split(';').map(s=>s.trim()).filter(Boolean);
+  for(const t of tags){
+    if(!parts.some(p=>p.toLowerCase()===t.toLowerCase())) parts.push(t);
+  }
+  return parts.join('; ');
+}
+
+function onSongDragStart(event, songId){
+  _dragSongIds = selectedIds.has(songId) ? [...selectedIds] : [songId];
+  event.dataTransfer.setData('text/plain', String(songId));  // needed for Firefox
+  event.dataTransfer.effectAllowed = 'copy';
+  event.currentTarget.classList.add('dragging');
+}
+
+function onSongDragEnd(event){
+  event.currentTarget.classList.remove('dragging');
+  _dragSongIds = [];
+}
+
+function onCrateDragStart(event, crateId, isSmart){
+  _dragCrateId = crateId;
+  _dragCrateSmart = isSmart;
+  event.dataTransfer.setData('text/plain', 'crate:' + crateId);
+  event.dataTransfer.effectAllowed = 'move';
+  event.currentTarget.classList.add('dragging');
+}
+
+function onCrateDragEnd(event){
+  event.currentTarget.classList.remove('dragging');
+  _dragCrateId = null;
+  _dragCrateSmart = 0;
+}
+
+function onCrateDragOver(event, crateId, isSmart){
+  event.preventDefault();               // without this the drop is refused
+  if(_dragCrateId !== null){
+    // Reorder mode: only within the same section, never onto itself. The row
+    // slides live as the pointer crosses the target's top/bottom half.
+    if(isSmart !== _dragCrateSmart || crateId === _dragCrateId) return;
+    event.dataTransfer.dropEffect = 'move';
+    const dragEl = document.getElementById(`crate-nav-${_dragCrateId}`);
+    if(!dragEl) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const before = (event.clientY - rect.top) < rect.height / 2;
+    event.currentTarget.parentElement.insertBefore(
+      dragEl, before ? event.currentTarget : event.currentTarget.nextSibling);
+  } else {
+    // Song drop mode: manual crates add the song, smart crates offer to tag it.
+    event.dataTransfer.dropEffect = 'copy';
+    event.currentTarget.classList.add(isSmart ? 'drop-target-tag' : 'drop-target');
+  }
+}
+
+function onCrateDragLeave(event){
+  // Ignore leaves that move onto a child button (⇄ / ⭳ / ✕) -- only clear the
+  // highlight once the pointer exits the whole row.
+  if(event.currentTarget.contains(event.relatedTarget)) return;
+  event.currentTarget.classList.remove('drop-target','drop-target-tag');
+}
+
+async function onCrateDrop(event, crateId, isSmart, crateName){
+  event.preventDefault();
+  event.stopPropagation();
+  event.currentTarget.classList.remove('drop-target','drop-target-tag');
+  if(_dragCrateId !== null){
+    // Reorder: persist the whole dragged section in its new visual order.
+    if(isSmart !== _dragCrateSmart || crateId === _dragCrateId) return;
+    const list = event.currentTarget.parentElement;
+    const ids = [...list.querySelectorAll('.nav-item')]
+      .filter(el => el.dataset.smart === String(_dragCrateSmart))
+      .map(el => parseInt(el.dataset.crateId));
+    await fetch('/api/crates/reorder', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({crate_ids: ids})
+    });
+    toast('Crate order saved');
+    await loadCrates();
+  } else {
+    const ids = _dragSongIds.length
+      ? _dragSongIds
+      : [parseInt(event.dataTransfer.getData('text/plain'))];
+    if(!ids.length || ids.some(isNaN)) return;
+    if(isSmart){
+      // Smart crate: ask before stamping its genre tags onto the song(s).
+      const crate=(window._allCrates||[]).find(c=>c.id===crateId);
+      const tags=crate ? parseCrateTags(crate.rules) : [];
+      if(!tags.length){
+        toast('This smart crate only filters by BPM/key/duration etc. — nothing to tag');
+        return;
+      }
+      const names=ids.map(id=>{
+        const s=allSongs.find(x=>x.id===id);
+        return s ? (s.title||s.filename||`song #${id}`) : `song #${id}`;
+      });
+      const label=ids.length===1 ? `“${names[0]}”` : `${ids.length} songs`;
+      const tagList=tags.map(t=>`“${t}”`).join(', ');
+      if(!confirm(`Add tag ${tagList} to ${label}?\n\nThis makes the song${ids.length===1?'':'s'} match the smart crate “${crateName}”.`)) return;
+      let changed=0;
+      for(const id of ids){
+        const s=allSongs.find(x=>x.id===id);
+        const merged=mergeGenreTags(s?.genre,tags);
+        if((s?.genre||'')===merged) continue;   // already carries every tag
+        await fetch(`/api/songs/${id}`, {method:'PATCH', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({genre: merged})});
+        if(s) s.genre=merged;
+        changed++;
+      }
+      if(!changed){ toast(`Already matches “${crateName}”`); return; }
+      toast(`Tagged ${changed} song${changed===1?'':'s'} — now in “${crateName}”`);
+      if(currentCrate===crateId) loadSongs(crateId);
+      return;
+    }
+    const resp = await fetch(`/api/crates/${crateId}/add-songs`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({song_ids: ids})
+    });
+    const data = await resp.json();
+    if(!resp.ok || data.error){ toast(data.error || 'Could not add to crate'); return; }
+    toast(`Added ${ids.length} song${ids.length===1?'':'s'} to “${crateName}”`);
+    // If the target crate is the one on screen, reload it so the songs appear.
+    if(currentCrate === crateId) loadSongs(crateId);
+  }
+}
+
 // new crate modal
 let ruleCount=0;
-function openNewCrateModal() {
+function openNewCrateModal(asManual) {
   editingCrateId=null;
   document.getElementById('crateModalTitle').textContent='New Crate';
   document.getElementById('crateName').value='';
   document.getElementById('ruleRows').innerHTML='';
-  document.getElementById('crateTypeSmart').checked=true;
+  // Plain (manual) crates are the default; smart is opt-in.
+  const manual = asManual !== false;
+  document.getElementById('crateTypeSmart').checked = !manual;
   toggleCrateType();
   ruleCount=0;
-  addRule();
+  if (!manual) addRule();
   document.getElementById('crateModal').classList.add('open');
 }
 
@@ -2592,15 +2816,28 @@ async function saveCrate() {
       if(field&&op&&val) rules.push({field,op,value:isNaN(val)?val:parseFloat(val)});
     });
   }
+  let createdId=null;
   if(editingCrateId){
     await fetch(`/api/crates/${editingCrateId}`,{method:'PATCH',
       headers:{'Content-Type':'application/json'},body:JSON.stringify({name,rules})});
   } else {
-    await fetch('/api/crates',{method:'POST',
+    const resp=await fetch('/api/crates',{method:'POST',
       headers:{'Content-Type':'application/json'},body:JSON.stringify({name,is_smart:isSmart,rules})});
+    createdId=(await resp.json()).id;
   }
   closeCrateModal();
   await loadCrates();
+  // If the crate was created from the download dropdown, select it so the
+  // upcoming download lands in it without another pick.
+  if(pendingDownloadCrate){
+    pendingDownloadCrate=false;
+    const sel=document.getElementById('downloadCrateSelect');
+    if(sel && createdId) sel.value=String(createdId);
+  } else if(createdId){
+    // Created from the Crates tab -- open it right away so its (empty)
+    // contents are visible instead of staying on the previous view.
+    selectCrate(createdId, document.getElementById(`crate-nav-${createdId}`));
+  }
 }
 
 function closeCrateModal(){document.getElementById('crateModal').classList.remove('open')}
@@ -2802,8 +3039,12 @@ function renderSongs(songs){
       <div class="song-row${sel?' selected':''}${s.id===playerSongId?' playing':''}" id="row-${s.id}"
         onclick="onRowClick(event,${s.id})"
         ondblclick="onRowDoubleClick(event,${s.id})"
-        oncontextmenu="onRowContext(event,${s.id})">
-        <div class="row-cb" id="cb-${s.id}"></div>
+        oncontextmenu="onRowContext(event,${s.id})"
+        draggable="true"
+        ondragstart="onSongDragStart(event,${s.id})"
+        ondragend="onSongDragEnd(event)"
+        title="Drag onto a manual crate in the sidebar to add it">
+        <div class="row-cb" id="cb-${s.id}" onclick="onCheckboxClick(event,${s.id})"></div>
         <div class="si2">${i+1}</div>
         ${dataCells}
         <div class="row-acts" onclick="event.stopPropagation()">
@@ -2829,10 +3070,21 @@ function onRowClick(event, songId){
   // Double-click reveals the file instead.
 }
 
+function onCheckboxClick(event, songId){
+  // The checkbox is the easy way to select: one click toggles the song in and
+  // out of the selection, no Cmd+click needed (Cmd+click on the row still works).
+  event.stopPropagation();
+  if(selectedIds.has(songId)) selectedIds.delete(songId);
+  else selectedIds.add(songId);
+  updateRowSelection(songId);
+  updateSelectionBar();
+}
+
 function onRowDoubleClick(event, songId){
   // Ignore double-clicks landing on the row's own buttons/cells
   if(event.target.closest('.row-acts')||event.target.classList.contains('gc')
-      ||event.target.classList.contains('ge')) return;
+      ||event.target.classList.contains('ge')
+      ||event.target.classList.contains('row-cb')) return;
   // Double-click previews the track in the player bar, the way DJ software
   // does; "Show" in the row actions still reveals the file in Finder.
   playSong(songId);
@@ -2853,12 +3105,28 @@ document.addEventListener('keydown', e=>{
     e.preventDefault();
     togglePlay();
   }
+  if(e.key==='Enter'){
+    // Enter approves the topmost modal: fires its primary action (save /
+    // confirm / pick). Ignored during IME composition (typing Japanese etc.)
+    // and when focus sits on a button/link/select -- there the browser's own
+    // Enter activation should win, not the modal's primary button.
+    if(e.isComposing||e.keyCode===229) return;
+    const openModals=document.querySelectorAll('.modal-bd.open');
+    if(!openModals.length) return;
+    const t=e.target;
+    if(t && typeof t.closest==='function' && t.closest('button, a, select')) return;
+    const btn=primaryButtonFor(openModals[openModals.length-1].id);
+    if(btn){ e.preventDefault(); btn.click(); }
+    return;
+  }
   if(e.key==='Escape'){
     hideCtxMenu();
-    // Escape dismisses an open modal first; only when no modal is open does it
-    // clear the selection — otherwise a hidden selection vanish mid-edit.
-    const openModal=document.querySelector('.modal-bd.open');
-    if(openModal){ closeOpenModal(openModal.id); return; }
+    // Escape dismisses the topmost open modal first (modals can stack, e.g.
+    // the crate picker opened from the metadata editor); only when none is
+    // open does it clear the selection — otherwise a hidden selection vanishes
+    // mid-edit.
+    const openModals=document.querySelectorAll('.modal-bd.open');
+    if(openModals.length){ closeOpenModal(openModals[openModals.length-1].id); return; }
     clearSelection();
   }
 });
@@ -2987,6 +3255,15 @@ async function openInfoModal(ids, event){
   renderTransitionsSection(isBatchEdit ? null : firstSong?.id);
 }
 
+function addInfoSongsToCrate(){
+  // Adds the song(s) currently open in the metadata editor to a manual crate,
+  // reusing the same picker as the selection toolbar. The editor stays open
+  // underneath so you can keep editing or add to more crates.
+  const ids=JSON.parse(document.getElementById('infoModal').dataset.ids||'[]');
+  if(!ids.length) return;
+  openAddToCratePicker(ids);
+}
+
 async function saveInfo(){
   const ids=JSON.parse(document.getElementById('infoModal').dataset.ids||'[]');
   const updates={};
@@ -3097,6 +3374,7 @@ function transRowHtml(t, dir){
 
 // Inline edit form (notes + tag) that replaces a row while editing.
 function transEditHtml(t){
+  const folderSel = transFolderSelectHtml(t.folder_id, `te-folder-${t.id}`);
   return `
     <div class="ts-row" id="trow-${t.id}">
       <div class="ts-arrow">✎</div>
@@ -3105,6 +3383,7 @@ function transEditHtml(t){
           value="${esc(t.notes||'')}" style="flex:1;min-width:150px">
         <input class="ii" id="te-tag-${t.id}" placeholder="Tag (e.g. energy +1)"
           value="${esc(t.tag||'')}" style="width:130px">
+        ${folderSel}
         <button class="btn-sel" onclick="saveTransitionEdit(${t.id})">Save</button>
         <button class="btn-sel"
           onclick="window._editingTransId=null;renderTransitionsSection(currentSong.id)">Cancel</button>
@@ -3115,8 +3394,10 @@ function transEditHtml(t){
 async function saveTransitionEdit(id){
   const notes=document.getElementById(`te-notes-${id}`)?.value.trim()||'';
   const tag=document.getElementById(`te-tag-${id}`)?.value.trim()||'';
+  const folderEl=document.getElementById(`te-folder-${id}`);
+  const folder_id=folderEl ? (folderEl.value ? parseInt(folderEl.value,10) : null) : undefined;
   await fetch(`/api/transitions/${id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({notes,tag})});
+    body:JSON.stringify({notes,tag,folder_id})});
   window._editingTransId=null;
   if(currentSong) renderTransitionsSection(currentSong.id);
   if(document.getElementById('tab-transitions').classList.contains('active')) renderTransitionTab();
@@ -3177,6 +3458,12 @@ async function openAddTransitionModal(sourceId){
       <input class="ii" id="atNotes" placeholder="Notes — technique, timing…" style="flex:1">
       <input class="ii" id="atTag" placeholder="Tag (e.g. energy +1)" style="width:140px">
     </div>
+    <div id="atFolderWrap" style="margin-top:10px;display:flex;align-items:center;gap:8px">
+      <span class="ts-group-label" style="margin:0;padding:0">📁 Folder</span>
+      <select class="rule-sel" id="atFolder" style="flex:1;width:auto">
+        <option value="">All transitions (no folder)</option>
+      </select>
+    </div>
     <label style="margin-top:10px;display:flex;align-items:center;gap:7px;cursor:pointer;color:var(--text2);font-size:11.5px">
       <input type="checkbox" id="atToTry">
       Mark as “to try” — queue this mix for a live test before trusting it
@@ -3187,6 +3474,8 @@ async function openAddTransitionModal(sourceId){
     </div>`;
   if(!fixedFrom) atRenderList('atFromList','atFromSearch',true);
   atRenderList('atSongList','atSearch',false);
+  populateTransitionFolderSelect('atFolder', transSelectedFolder,
+    'All transitions (no folder)');
   document.getElementById('addTransitionModal').classList.add('open');
 }
 
@@ -3238,10 +3527,12 @@ async function confirmAddTransition(){
   const notes=document.getElementById('atNotes')?.value.trim();
   const tag=document.getElementById('atTag')?.value.trim();
   const toTry=document.getElementById('atToTry')?.checked||false;
+  const folderEl=document.getElementById('atFolder');
+  const folder_id=folderEl&&folderEl.value ? parseInt(folderEl.value,10) : null;
   const resp=await fetch(`/api/songs/${pendingTransitionFromId}/transitions`,{method:'POST',
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify({to_song_id:toSong||undefined,to_text:toText||undefined,notes,tag,
-      status:toTry?'to_try':'confirmed'})});
+      status:toTry?'to_try':'confirmed',folder_id})});
   const data=await resp.json();
   if(data.error){ alert(data.error); return; }
   closeAddTransitionModal();
@@ -3311,6 +3602,59 @@ function exportCrateXml(id){ downloadBlob('/api/export/rekordbox-xml?crate_id='+
 // All links grouped by source song, newest first, with jump-to-song and delete.
 // Two sections: confirmed transitions, then "transitions to try" (status='to_try')
 // — untested mixes awaiting a live check, each with a ✓ commit button.
+// Optionally filtered to one folder: right-click the tab to create/rename/delete
+// folders, right-click a folder row to rename or delete it.
+let transFolders=[];        // [{id,name,count}]
+let transSelectedFolder=null;
+
+async function fetchTransFolders(){
+  try{ transFolders=await (await fetch('/api/transition-folders')).json(); }
+  catch(e){ transFolders=[]; }
+}
+
+// Small <select> for picking a transition's folder. Used by the add-transition
+// modal and the inline transition editor.
+function transFolderSelectHtml(selectedId, idAttr){
+  return `<select class="rule-sel" ${idAttr?`id="${idAttr}"`:''} title="Folder this transition lives in"
+    style="width:auto;max-width:130px">
+    <option value="">No folder</option>
+    ${transFolders.map(f=>`<option value="${f.id}" ${selectedId===f.id?'selected':''}>📁 ${esc(f.name)}</option>`).join('')}
+  </select>`;
+}
+
+// Fills one of the folder <select>s once the folder list is loaded.
+function populateTransitionFolderSelect(selId, selectedId, allLabel){
+  const sel=document.getElementById(selId);
+  if(!sel) return;
+  sel.innerHTML=`<option value="">${esc(allLabel||'No folder')}</option>
+    ${transFolders.map(f=>`<option value="${f.id}" ${selectedId===f.id?'selected':''}>📁 ${esc(f.name)}</option>`).join('')}`;
+}
+
+// The folder chips row above the transition groups. Includes a virtual
+// "All transitions" chip (null) plus every folder with its transition count.
+function renderTransFolderStrip(){
+  const el=document.getElementById('transFolderList');
+  if(!el) return;
+  if(!transFolders.length){ el.innerHTML=''; return; }
+  el.innerHTML=`
+    <div class="nav-item ${transSelectedFolder===null?'active':''}" title="Every transition, folders and all"
+      onclick="selectTransFolder(null)">
+      <span class="nav-item-label">All transitions</span>
+    </div>
+    ${transFolders.map(f=>`
+      <div class="nav-item ${transSelectedFolder===f.id?'active':''}" oncontextmenu="onTransFolderContext(event,${f.id})"
+        title="${esc(f.name)} — ${f.count} transition${f.count===1?'':'s'} (right-click to rename or delete)">
+        <span class="nav-item-label">📁 ${esc(f.name)}</span>
+        <span class="ts-tab-count">${f.count}</span>
+      </div>`).join('')}`;
+}
+
+async function selectTransFolder(fid){
+  transSelectedFolder=fid;
+  renderTransFolderStrip();
+  await renderTransitionTab();
+}
+
 async function renderTransitionTab(){
   const list=document.getElementById('transitionList');
   if(!list) return;
@@ -3318,6 +3662,9 @@ async function renderTransitionTab(){
   try{
     transitions=await (await fetch('/api/transitions')).json();
   }catch(e){ list.innerHTML='<div class="ts-empty" style="padding:10px 6px">Could not load transitions.</div>'; return; }
+  await fetchTransFolders();
+  renderTransFolderStrip();
+  if(transSelectedFolder!==null) transitions=transitions.filter(t=>t.folder_id===transSelectedFolder);
   updateTransTryBadge(transitions);
   const toTry=transitions.filter(t=>t.status==='to_try');
   const confirmed=transitions.filter(t=>t.status!=='to_try');
@@ -3344,16 +3691,107 @@ async function renderTransitionTab(){
     </div>`;
   }).join('');
   const toTryHtml = toTry.length
-    ? renderGroup(Object.entries(toTry).reduce((g,t)=>{ (g[t.from_song_id]=g[t.from_song_id]||[]).push(t); return g; },{}))
+    ? renderGroup(toTry.reduce((g,t)=>{ (g[t.from_song_id]=g[t.from_song_id]||[]).push(t); return g; },{}))
     : '<div class="ts-empty" style="padding:4px 6px">Nothing queued — add a transition with “Mark as to-try”.</div>';
   const confirmedHtml = confirmed.length
-    ? renderGroup(Object.entries(confirmed).reduce((g,t)=>{ (g[t.from_song_id]=g[t.from_song_id]||[]).push(t); return g; },{}))
+    ? renderGroup(confirmed.reduce((g,t)=>{ (g[t.from_song_id]=g[t.from_song_id]||[]).push(t); return g; },{}))
     : '<div class="ts-empty" style="padding:4px 6px">No confirmed transitions yet.</div>';
   list.innerHTML=`
     <div class="ts-group-label" style="padding:6px 6px 2px">🧪 Transitions to try (${toTry.length})</div>
     ${toTryHtml}
     <div class="ts-group-label" style="padding:10px 6px 2px">✓ Confirmed transitions (${confirmed.length})</div>
     ${confirmedHtml}`;
+}
+
+// -- TRANSITION FOLDER CONTEXT MENU -----------------------------------------
+// Right-click the Transitions tab (or a folder row) to create / rename /
+// delete folders. Deleting a folder never deletes transitions — they fall
+// back to "All transitions".
+let transCtxFolderId = null;   // folder the menu was opened on (null = blank area)
+
+function showTransCtxMenu(event, folderId){
+  event.preventDefault();
+  transCtxFolderId = folderId;
+  const menu = document.getElementById('transCtxMenu');
+  const onFolder = folderId !== null;
+  document.getElementById('tctxRename').style.display = onFolder ? '' : 'none';
+  document.getElementById('tctxSep').style.display    = onFolder ? '' : 'none';
+  document.getElementById('tctxDelete').style.display = onFolder ? '' : 'none';
+  if(onFolder){
+    const f = transFolders.find(x=>x.id===folderId);
+    const n = f ? f.count : 0;
+    document.getElementById('tctxDelete').textContent =
+      `🗑 Delete folder${n ? ` (${n} transition${n===1?'':'s'} keep)` : ''}`;
+  }
+  menu.classList.add('open');
+  const w = menu.offsetWidth, h = menu.offsetHeight;
+  menu.style.left = Math.max(8, Math.min(event.clientX, innerWidth  - w - 8)) + 'px';
+  menu.style.top  = Math.max(8, Math.min(event.clientY, innerHeight - h - 8)) + 'px';
+}
+
+function hideTransCtxMenu(){ document.getElementById('transCtxMenu').classList.remove('open'); }
+document.addEventListener('click', e => { if(!e.target.closest('#transCtxMenu')) hideTransCtxMenu(); });
+window.addEventListener('blur', hideTransCtxMenu);
+document.getElementById('tctxNew').onclick    = () => { hideTransCtxMenu(); createTransitionFolder(); };
+document.getElementById('tctxRename').onclick = () => { const id=transCtxFolderId; hideTransCtxMenu(); renameTransitionFolder(id); };
+document.getElementById('tctxDelete').onclick = () => { const id=transCtxFolderId; hideTransCtxMenu(); deleteTransitionFolder(id); };
+
+// Right-click anywhere in the Transitions tab (blank areas bubble here).
+function onTransPanelContext(event){ showTransCtxMenu(event, null); }
+// Right-click on a folder row pre-selects that folder in the menu.
+function onTransFolderContext(event, folderId){ showTransCtxMenu(event, folderId); }
+
+async function createTransitionFolder(){
+  const name = prompt('Name the new transition folder:', '');
+  if(name === null) return;                       // cancelled
+  const trimmed = name.trim();
+  if(!trimmed) return;                             // empty = no-op
+  const resp = await fetch('/api/transition-folders', {method:'POST',
+    headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:trimmed})});
+  const data = await resp.json();
+  if(data.error){ alert(data.error); return; }
+  await fetchTransFolders();
+  transSelectedFolder = data.id;
+  renderTransFolderStrip();
+  await renderTransitionTab();
+  toast(`Folder "${trimmed}" created`);
+}
+
+async function renameTransitionFolder(fid){
+  if(fid === null) return;
+  const f = transFolders.find(x=>x.id===fid);
+  if(!f) return;
+  const name = prompt('Rename folder:', f.name);
+  if(name === null) return;                       // cancelled
+  const trimmed = name.trim();
+  if(!trimmed || trimmed === f.name) return;       // empty / unchanged = no-op
+  const resp = await fetch(`/api/transition-folders/${fid}`, {method:'PATCH',
+    headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:trimmed})});
+  const data = await resp.json();
+  if(data.error){ alert(data.error); return; }
+  await fetchTransFolders();
+  renderTransFolderStrip();
+  await renderTransitionTab();
+  toast(`Folder renamed to "${trimmed}"`);
+}
+
+async function deleteTransitionFolder(fid){
+  if(fid === null) return;
+  const f = transFolders.find(x=>x.id===fid);
+  if(!f) return;
+  const n = f.count || 0;
+  const msg = n
+    ? `Delete folder "${f.name}"?\n\nIts ${n} transition${n===1?'':'s'} will NOT be deleted — they move back to "All transitions".`
+    : `Delete empty folder "${f.name}"?`;
+  if(!confirm(msg)) return;
+  const resp = await fetch(`/api/transition-folders/${fid}`, {method:'DELETE'});
+  const data = await resp.json();
+  if(data.error){ alert(data.error); return; }
+  if(transSelectedFolder === fid) transSelectedFolder = null;
+  await fetchTransFolders();
+  renderTransFolderStrip();
+  await renderTransitionTab();
+  toast(`Folder "${f.name}" deleted`);
 }
 
 // Header badge: show the to-try count whenever it is non-zero.
@@ -3909,7 +4347,35 @@ function closeOpenModal(id){
   else if(id==='mergePickerModal') closeMergePicker();
   else if(id==='folderPickerModal') closeFolderPicker();
   else if(id==='cleanupModal') closeMetadataCleanup();
+  else if(id==='introModal') closeIntroGuide();
   else closeCrateModal();
+}
+
+// The primary action for each modal, used by the Enter key to "approve".
+// List-style pickers (add-to-crate) approve by choosing their first option;
+// disabled primary buttons (e.g. merge picker before 2 songs are chosen)
+// return null so Enter stays a no-op until the action is actually possible.
+function primaryButtonFor(modalId){
+  const m=document.getElementById(modalId);
+  if(!m) return null;
+  if(modalId==='addToCrateModal'){
+    return m.querySelector('#addToCrateBody .nav-item')||null;
+  }
+  const sels={
+    infoModal:'.btn-save',
+    crateModal:'.btn-save',
+    addTransitionModal:'.btn-save',
+    introModal:'.btn-save',
+    folderPickerModal:'#folderUseBtn',
+    mergePickerModal:'#mergePickGo',
+    mergeModal:'.btn-save',
+    cleanupModal:'#cleanupApplyBtn',
+    dupeModal:'#mergeAllBtn'
+  };
+  const sel=sels[modalId];
+  if(!sel) return null;
+  const b=m.querySelector(sel);
+  return (b&&!b.disabled)?b:null;
 }
 
 ['infoModal','dupeModal','crateModal','addToCrateModal','addTransitionModal','mergeModal','mergePickerModal','folderPickerModal','cleanupModal'].forEach(id=>{
@@ -4140,7 +4606,8 @@ function updateCleanupHint(){
   if(el) el.textContent =
     `${todo.length} track${todo.length===1?'':'s'} to scan` +
     (applied || kept ? ` · ${applied} fixed via Spotify · ${kept} kept as-is` : '') +
-    '. Matching happens on Spotify; you review every fix before anything is written.' +
+    (window.autoCleanupMetadata ? ' New downloads are auto-cleaned (high-confidence only). ' : ' ') +
+    '. Matching happens on Spotify; you review every proposed fix before anything is written.' +
     (todo.length === 0 && missing.length ? ' Uncheck the toggle above to rescan everything.' : '');
 }
 

@@ -9,7 +9,7 @@ const SHELL = [
 ];
 // Bump the version whenever the shell changes so the old cached HTML is
 // purged on activate — a stale frontend keeps serving old bugs forever.
-const CACHE = 'djlib-v2';
+const CACHE = 'djlib-v9';
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)));
@@ -27,6 +27,10 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET') return;
+  // Never touch cross-origin traffic — external links (GitHub, Buy Me a Coffee)
+  // must go straight to the browser, and caching other sites' responses here
+  // is pointless. Intercepting them can blank out the window in app mode.
+  if (url.origin !== self.location.origin) return;
   // API calls are never cached — always hit the live server.
   if (url.pathname.startsWith('/api/')) return;
   // HTML goes network-first (falling back to the cached shell offline).

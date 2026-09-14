@@ -56,6 +56,12 @@ KEY_DISPLAY = _config.get("key_display", "camelot")
 # Whether new external installs should auto-install Python if it's missing
 # (the installer asks, defaulting to this saved preference).
 AUTO_INSTALL_PYTHON = bool(_config.get("auto_install_python", True))
+# Whether freshly-downloaded tracks get their metadata cleaned up automatically
+# against Spotify. Off by default: the first-run onboarding proposes it, and the
+# Cleanup tool in Settings can switch it anytime. Only HIGH-confidence matches are
+# applied straight away; weaker ones are left for the manual review tool
+# (see auto_cleanup_download).
+AUTO_CLEANUP_METADATA = bool(_config.get("auto_cleanup_metadata", False))
 
 
 def _config_dict():
@@ -66,14 +72,15 @@ def _config_dict():
             'auto_sync_mixxx': AUTO_SYNC_MIXXX,
             'auto_sync_mixxx_plays': AUTO_SYNC_MIXXX_PLAYS,
             'key_display': KEY_DISPLAY,
-            'auto_install_python': AUTO_INSTALL_PYTHON}
+            'auto_install_python': AUTO_INSTALL_PYTHON,
+            'auto_cleanup_metadata': AUTO_CLEANUP_METADATA}
 
 
 def _save_config(updates):
     """Merges `updates` into config.json (preserving existing keys, including
     the Spotify secrets) and refreshes the affected module-level settings.
     Only settings that can change at runtime are updated here."""
-    global _config, REKORDBOX_EXPORT_PATH, DJS_SOFTWARE, AUTO_SYNC_MIXXX, AUTO_SYNC_MIXXX_PLAYS, KEY_DISPLAY, AUTO_INSTALL_PYTHON
+    global _config, REKORDBOX_EXPORT_PATH, DJS_SOFTWARE, AUTO_SYNC_MIXXX, AUTO_SYNC_MIXXX_PLAYS, KEY_DISPLAY, AUTO_INSTALL_PYTHON, AUTO_CLEANUP_METADATA
     path = os.path.expanduser("~/.dj-library/config.json")
     data = dict(_config)
     data.update(updates)
@@ -92,6 +99,8 @@ def _save_config(updates):
         KEY_DISPLAY = updates['key_display']
     if 'auto_install_python' in updates:
         AUTO_INSTALL_PYTHON = bool(updates['auto_install_python'])
+    if 'auto_cleanup_metadata' in updates:
+        AUTO_CLEANUP_METADATA = bool(updates['auto_cleanup_metadata'])
 
 # -- DATABASE --------------------------------------------------------------
 
@@ -116,7 +125,7 @@ def init_db():
         db.execute('''CREATE TABLE IF NOT EXISTS crates (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
-            is_smart INTEGER DEFAULT 1,
+            is_smart INTEGER DEFAULT 0,
             rules TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )''')
@@ -124,6 +133,12 @@ def init_db():
             crate_id INTEGER, song_id INTEGER,
             PRIMARY KEY (crate_id, song_id)
         )''')
+        # User-controlled crate order in the sidebar (drag & drop). New crates
+        # are appended (max+1); a reorder rewrites the whole section.
+        try:
+            db.execute("ALTER TABLE crates ADD COLUMN sort_order INTEGER DEFAULT 0")
+            db.commit()
+        except: pass
         # Transition links between songs: a directional "mix A into B" note.
         # to_song_id links to another library song; to_text is used instead for
         # text-only targets (tracks you don't own yet). notes/tag are freeform
@@ -152,6 +167,18 @@ def init_db():
             db.execute("ALTER TABLE transitions ADD COLUMN status TEXT DEFAULT 'confirmed'")
             db.commit()
             db.execute("UPDATE transitions SET status='confirmed' WHERE status IS NULL")
+            db.commit()
+        except: pass
+        # Folders for grouping transitions in the Transitions tab. A transition
+        # lives in at most one folder (folder_id NULL = "All transitions").
+        db.execute('''CREATE TABLE IF NOT EXISTS transition_folders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )''')
+        db.commit()
+        try:
+            db.execute("ALTER TABLE transitions ADD COLUMN folder_id INTEGER")
             db.commit()
         except: pass
 
@@ -780,6 +807,10 @@ def do_download(query, spotify_id=None, title=None, artist=None,
                 if row:
                     threading.Thread(target=analyze_and_store,
                         args=[downloaded_path, row['id'], spotify_id], daemon=True).start()
+                    # Best-effort metadata cleanup: apply only high-confidence
+                    # Spotify matches straight away; weaker ones wait for review.
+                    threading.Thread(target=auto_cleanup_download,
+                        args=[row['id']], daemon=True).start()
         download_status[job_id] = {'status':'success','file':downloaded_path}
         subprocess.run(['osascript','-e',
             f'display notification "Downloaded: {title or query}" with title "DJ Library"'])
@@ -1400,6 +1431,8 @@ def update_config():
         updates['key_display'] = kd
     if 'auto_install_python' in data:
         updates['auto_install_python'] = bool(data['auto_install_python'])
+    if 'auto_cleanup_metadata' in data:
+        updates['auto_cleanup_metadata'] = bool(data['auto_cleanup_metadata'])
     if not updates:
         return jsonify({'error': 'no valid fields'}), 400
     _save_config(updates)
@@ -1584,30 +1617,37 @@ def cleanup_match(song_id):
     m['song_id'] = song_id
     return jsonify({'found': True, **m})
 
-@app.route('/api/cleanup/apply/<int:song_id>', methods=['POST'])
-def cleanup_apply(song_id):
-    """Writes reviewed tags to one track's ID3 file tags and DB row."""
-    data = request.json or {}
+def _write_cleanup_fix(song_id, updates, spotify_id=None):
+    """Writes one track's cleaned-up tags to its ID3 file and DB row, and
+    records the decision as 'applied' so future "only never-scanned" cleanups
+    skip this track and manual tag edits are never silently overwritten.
+    Shared by the review apply endpoint and the automatic cleanup on download.
+    Returns True if the song existed and was updated."""
     with get_db() as db:
         row = db.execute('SELECT filepath FROM songs WHERE id=?', (song_id,)).fetchone()
         if not row:
-            return jsonify({'error': 'not found'}), 404
+            return False
         filepath = row['filepath']
-        updates = {k: data[k] for k in ('title','artist','album','year','genre')
-                   if data.get(k)}
         if updates:
             sets = ','.join(f'{k}=?' for k in updates)
             db.execute(f'UPDATE songs SET {sets} WHERE id=?', (*updates.values(), song_id))
-        if data.get('spotify_id'):
-            db.execute('UPDATE songs SET spotify_id=? WHERE id=?', (data['spotify_id'], song_id))
-        # Applying a fix records the decision: future "only never-scanned"
-        # cleanups skip this track, so manual tag edits made afterwards are
-        # never silently overwritten by Spotify data.
+        if spotify_id:
+            db.execute('UPDATE songs SET spotify_id=? WHERE id=?', (spotify_id, song_id))
         db.execute('''UPDATE songs SET cleanup_scanned_at=CURRENT_TIMESTAMP,
             cleanup_decision='applied' WHERE id=?''', (song_id,))
         db.commit()
     write_metadata(filepath, **updates)
     queue_auto_export()
+    return True
+
+@app.route('/api/cleanup/apply/<int:song_id>', methods=['POST'])
+def cleanup_apply(song_id):
+    """Writes reviewed tags to one track's ID3 file tags and DB row."""
+    data = request.json or {}
+    updates = {k: data[k] for k in ('title','artist','album','year','genre')
+               if data.get(k)}
+    if not _write_cleanup_fix(song_id, updates, data.get('spotify_id')):
+        return jsonify({'error': 'not found'}), 404
     return jsonify({'ok': True, 'applied': list(updates)})
 
 @app.route('/api/cleanup/mark-scanned', methods=['POST'])
@@ -1628,6 +1668,42 @@ def cleanup_mark_scanned():
             [(decision, i) for i in ids])
         db.commit()
     return jsonify({'ok': True, 'marked': len(ids), 'decision': decision})
+
+def auto_cleanup_download(song_id):
+    """Background metadata cleanup for a freshly-downloaded track. Matches it
+    against Spotify and, when the match is HIGH confidence, writes the proper
+    tags straight through (same path as the review tool, so the fix is recorded
+    'applied' and never re-proposed). Medium / low / no match are deliberately
+    left unscanned so they still surface in the manual review tool for the user
+    to decide -- a shaky guess only ever auto-applies when our own confidence
+    agrees it's certain."""
+    if not AUTO_CLEANUP_METADATA:
+        return
+    try:
+        with get_db() as db:
+            s = db.execute('SELECT * FROM songs WHERE id=?', (song_id,)).fetchone()
+        if not s:
+            return
+        # A previous (manual) cleanup already decided this track -- don't
+        # overwrite tags the user may have set by hand.
+        if s['cleanup_scanned_at']:
+            return
+        title = s['title'] or clean_noise(Path(s['filepath']).stem)
+        m = _spotify_search_track(title, s['artist'], s['duration_seconds'])
+        if not m:
+            _log(f"Auto cleanup song {song_id}: no Spotify match ({title!r}) -- left for review")
+            return
+        if m.get('confidence') != 'high':
+            _log(f"Auto cleanup song {song_id}: {m['confidence']} confidence ({title!r}) -- left for review")
+            return
+        updates = {k: m[k] for k in ('title','artist','album','year') if m.get(k)}
+        genre = _spotify_artist_genre(m.get('artist_id'))
+        if genre:
+            updates['genre'] = genre
+        if _write_cleanup_fix(song_id, updates, m.get('spotify_id')):
+            _log(f"Auto cleanup song {song_id}: applied {list(updates)} (high confidence)")
+    except Exception as e:
+        _log(f"Auto cleanup failed for song {song_id}: {e}")
 
 @app.route('/api/songs/<int:song_id>', methods=['PATCH'])
 def update_song(song_id):
@@ -2505,18 +2581,23 @@ def get_genres():
 
 @app.route('/api/crates')
 def get_crates():
+    # sort_order first (drag-and-drop reorder), name as the tiebreak for
+    # crates that were never reordered.
     with get_db() as db:
-        rows = db.execute('SELECT * FROM crates ORDER BY name').fetchall()
+        rows = db.execute('SELECT * FROM crates ORDER BY sort_order, name').fetchall()
     return jsonify([dict(r) for r in rows])
 
 @app.route('/api/crates', methods=['POST'])
 def create_crate():
     data  = request.json
     name  = data.get('name','New Crate')
-    smart = data.get('is_smart', True)
+    smart = data.get('is_smart', False)
     rules = json.dumps(data.get('rules',[]))
     with get_db() as db:
-        db.execute('INSERT INTO crates (name,is_smart,rules) VALUES(?,?,?)',
+        # New crates land at the end of the list; reordering rewrites the
+        # whole section's sort_order so the max+1 here stays unambiguous.
+        db.execute('INSERT INTO crates (name,is_smart,rules,sort_order) '
+                   'VALUES(?,?,?,COALESCE((SELECT MAX(sort_order)+1 FROM crates),1))',
             (name, 1 if smart else 0, rules))
         db.commit()
         cid = db.execute('SELECT last_insert_rowid()').fetchone()[0]
@@ -2562,6 +2643,23 @@ def get_crate_songs(crate_id):
         return jsonify([dict(r) for r in rows])
 
 
+@app.route('/api/crates/reorder', methods=['POST'])
+def reorder_crates():
+    """Persists the sidebar's crate order: assigns sequential sort_order values
+    to the given crate IDs (the frontend sends one full section -- manual or
+    smart -- in its new visual order). Crates not in the list keep their
+    current sort_order, so the other section is untouched."""
+    data = request.json or {}
+    ordered_ids = data.get('crate_ids', [])
+    if not ordered_ids:
+        return jsonify({'error': 'No crate IDs provided'}), 400
+    with get_db() as db:
+        for i, cid in enumerate(ordered_ids, start=1):
+            db.execute('UPDATE crates SET sort_order=? WHERE id=?', (i, cid))
+        db.commit()
+    return jsonify({'ok': True, 'reordered': len(ordered_ids)})
+
+
 @app.route('/api/crates/<int:crate_id>/add-songs', methods=['POST'])
 def add_songs_to_crate(crate_id):
     """
@@ -2577,6 +2675,10 @@ def add_songs_to_crate(crate_id):
         crate = db.execute('SELECT * FROM crates WHERE id=?', (crate_id,)).fetchone()
         if not crate:
             return jsonify({'error': 'Crate not found'}), 404
+        if crate['is_smart']:
+            # Smart crates compute membership from rules -- manually inserting
+            # rows here would create dead crate_songs entries that never show.
+            return jsonify({'error': 'Smart crates fill themselves from rules — you can\'t add songs manually.'}), 400
         for song_id in song_ids:
             db.execute('INSERT OR IGNORE INTO crate_songs (crate_id, song_id) VALUES (?, ?)',
                 (crate_id, song_id))
@@ -2638,14 +2740,14 @@ def get_transitions(song_id):
     with get_db() as db:
         if not db.execute('SELECT id FROM songs WHERE id=?', (song_id,)).fetchone():
             return jsonify({'error': 'Song not found'}), 404
-        outgoing = db.execute('''SELECT t.id, t.to_song_id, t.to_text, t.notes, t.tag, t.status,
+        outgoing = db.execute('''SELECT t.id, t.to_song_id, t.to_text, t.notes, t.tag, t.status, t.folder_id,
                 s.title AS to_title, s.artist AS to_artist,
                 s.filename AS to_filename, s.bpm AS to_bpm, s.musical_key AS to_key
             FROM transitions t
             LEFT JOIN songs s ON s.id = t.to_song_id
             WHERE t.from_song_id = ?
             ORDER BY t.created_at, t.id''', (song_id,)).fetchall()
-        incoming = db.execute('''SELECT t.id, t.from_song_id, t.notes, t.tag, t.status,
+        incoming = db.execute('''SELECT t.id, t.from_song_id, t.notes, t.tag, t.status, t.folder_id,
                 s.title AS from_title, s.artist AS from_artist, s.filename AS from_filename
             FROM transitions t
             JOIN songs s ON s.id = t.from_song_id
@@ -2666,6 +2768,12 @@ def add_transition(song_id):
     status = (data.get('status') or 'confirmed').strip()
     if status not in ('confirmed', 'to_try'):
         status = 'confirmed'
+    folder_id = data.get('folder_id')
+    if folder_id is not None:
+        try:
+            folder_id = int(folder_id)
+        except (TypeError, ValueError):
+            return jsonify({'error': 'Invalid folder'}), 400
 
     if to_song_id is not None and to_text:
         return jsonify({'error': 'Pick either a library song OR a text target, not both'}), 400
@@ -2680,13 +2788,15 @@ def add_transition(song_id):
     with get_db() as db:
         if not db.execute('SELECT id FROM songs WHERE id=?', (song_id,)).fetchone():
             return jsonify({'error': 'Source song not found'}), 404
+        if folder_id is not None and not db.execute('SELECT id FROM transition_folders WHERE id=?', (folder_id,)).fetchone():
+            return jsonify({'error': 'Folder not found'}), 404
         if to_song_id is not None:
             if to_song_id == song_id:
                 return jsonify({'error': 'A song cannot transition into itself'}), 400
             if not db.execute('SELECT id FROM songs WHERE id=?', (to_song_id,)).fetchone():
                 return jsonify({'error': 'Target song not found'}), 404
-        db.execute('''INSERT INTO transitions (from_song_id, to_song_id, to_text, notes, tag, status)
-            VALUES (?, ?, ?, ?, ?, ?)''', (song_id, to_song_id, to_text or None, notes or None, tag or None, status))
+        db.execute('''INSERT INTO transitions (from_song_id, to_song_id, to_text, notes, tag, status, folder_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?)''', (song_id, to_song_id, to_text or None, notes or None, tag or None, status, folder_id))
         db.commit()
         tid = db.execute('SELECT last_insert_rowid()').fetchone()[0]
     sync_transitions_after_change(song_id)
@@ -2698,11 +2808,13 @@ def list_transitions():
     newest first -- used by the Transitions sidebar tab."""
     with get_db() as db:
         rows = db.execute('''SELECT t.id, t.from_song_id, t.to_song_id, t.to_text, t.notes, t.tag, t.status,
+                t.folder_id, tf.name AS folder_name,
                 fs.title AS from_title, fs.artist AS from_artist, fs.filename AS from_filename,
                 ts.title AS to_title, ts.artist AS to_artist, ts.filename AS to_filename
             FROM transitions t
             JOIN songs fs ON fs.id = t.from_song_id
             LEFT JOIN songs ts ON ts.id = t.to_song_id
+            LEFT JOIN transition_folders tf ON tf.id = t.folder_id
             ORDER BY t.created_at DESC, t.id DESC''').fetchall()
     return jsonify([dict(r) for r in rows])
 
@@ -2723,6 +2835,18 @@ def update_transition(tid):
         if 'status' in data and data.get('status') in ('confirmed', 'to_try'):
             db.execute('UPDATE transitions SET status=? WHERE id=?',
                 (data['status'], tid))
+        if 'folder_id' in data:
+            fid = data.get('folder_id')
+            if fid in (None, ''):
+                db.execute('UPDATE transitions SET folder_id=NULL WHERE id=?', (tid,))
+            else:
+                try:
+                    fid = int(fid)
+                except (TypeError, ValueError):
+                    return jsonify({'error': 'Invalid folder'}), 400
+                if not db.execute('SELECT id FROM transition_folders WHERE id=?', (fid,)).fetchone():
+                    return jsonify({'error': 'Folder not found'}), 404
+                db.execute('UPDATE transitions SET folder_id=? WHERE id=?', (fid, tid))
         db.commit()
         from_song_id = row['from_song_id']
     sync_transitions_after_change(from_song_id)
@@ -2753,11 +2877,13 @@ def list_transitions_to_try():
     """All transitions marked as 'to_try' (untested), newest first."""
     with get_db() as db:
         rows = db.execute('''SELECT t.id, t.from_song_id, t.to_song_id, t.to_text, t.notes, t.tag, t.status,
+                t.folder_id, tf.name AS folder_name,
                 fs.title AS from_title, fs.artist AS from_artist, fs.filename AS from_filename,
                 ts.title AS to_title, ts.artist AS to_artist, ts.filename AS to_filename
             FROM transitions t
             JOIN songs fs ON fs.id = t.from_song_id
             LEFT JOIN songs ts ON ts.id = t.to_song_id
+            LEFT JOIN transition_folders tf ON tf.id = t.folder_id
             WHERE t.status = 'to_try'
             ORDER BY t.created_at DESC, t.id DESC''').fetchall()
     return jsonify([dict(r) for r in rows])
@@ -2773,6 +2899,64 @@ def confirm_transition(tid):
         db.commit()
         from_song_id = row['from_song_id']
     sync_transitions_after_change(from_song_id)
+    return jsonify({'ok': True})
+
+
+# -- TRANSITION FOLDERS -------------------------------------------------------
+# Optional grouping for transitions (like crates for songs). Deleting a folder
+# never deletes transitions -- they fall back to "All transitions".
+
+@app.route('/api/transition-folders')
+def list_transition_folders():
+    """Every folder with the number of transitions it contains."""
+    with get_db() as db:
+        rows = db.execute('''SELECT f.id, f.name, COUNT(t.id) AS count
+            FROM transition_folders f
+            LEFT JOIN transitions t ON t.folder_id = f.id
+            GROUP BY f.id ORDER BY lower(f.name), f.id''').fetchall()
+    return jsonify([dict(r) for r in rows])
+
+@app.route('/api/transition-folders', methods=['POST'])
+def create_transition_folder():
+    name = ((request.json or {}).get('name') or '').strip()
+    if not name:
+        return jsonify({'error': 'Folder name is required'}), 400
+    if len(name) > 80:
+        name = name[:80]
+    with get_db() as db:
+        if db.execute('SELECT id FROM transition_folders WHERE lower(name)=lower(?)', (name,)).fetchone():
+            return jsonify({'error': f'A folder named "{name}" already exists'}), 409
+        db.execute('INSERT INTO transition_folders (name) VALUES (?)', (name,))
+        db.commit()
+        fid = db.execute('SELECT last_insert_rowid()').fetchone()[0]
+    return jsonify({'ok': True, 'id': fid})
+
+@app.route('/api/transition-folders/<int:fid>', methods=['PATCH'])
+def rename_transition_folder(fid):
+    name = ((request.json or {}).get('name') or '').strip()
+    if not name:
+        return jsonify({'error': 'Folder name is required'}), 400
+    if len(name) > 80:
+        name = name[:80]
+    with get_db() as db:
+        if not db.execute('SELECT id FROM transition_folders WHERE id=?', (fid,)).fetchone():
+            return jsonify({'error': 'Folder not found'}), 404
+        if db.execute('SELECT id FROM transition_folders WHERE lower(name)=lower(?) AND id!=?',
+                      (name, fid)).fetchone():
+            return jsonify({'error': f'A folder named "{name}" already exists'}), 409
+        db.execute('UPDATE transition_folders SET name=? WHERE id=?', (name, fid))
+        db.commit()
+    return jsonify({'ok': True})
+
+@app.route('/api/transition-folders/<int:fid>', methods=['DELETE'])
+def delete_transition_folder(fid):
+    """Deletes the folder only; its transitions move back to "All transitions"."""
+    with get_db() as db:
+        if not db.execute('SELECT id FROM transition_folders WHERE id=?', (fid,)).fetchone():
+            return jsonify({'error': 'Folder not found'}), 404
+        db.execute('UPDATE transitions SET folder_id=NULL WHERE folder_id=?', (fid,))
+        db.execute('DELETE FROM transition_folders WHERE id=?', (fid,))
+        db.commit()
     return jsonify({'ok': True})
 
 
@@ -3016,7 +3200,7 @@ def _whole_library_export():
     on-disk auto-export and the manual download endpoint."""
     with get_db() as db:
         rows = db.execute('SELECT * FROM songs ORDER BY artist, title').fetchall()
-        crates = db.execute('SELECT id, name FROM crates ORDER BY name').fetchall()
+        crates = db.execute('SELECT id, name FROM crates ORDER BY sort_order, name').fetchall()
     songs = [dict(r) for r in rows]
     playlists = [(c['name'], crate_song_ids(c['id'])) for c in crates]
     return songs, playlists
