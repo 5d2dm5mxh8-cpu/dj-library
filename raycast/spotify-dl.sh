@@ -8,8 +8,8 @@
 # Optional parameters:
 # @raycast.icon 🎵
 # @raycast.argument1 { "type": "text", "placeholder": "Spotify link, song name, or paste multiple links" }
-# @raycast.argument2 { "type": "text", "placeholder": "Folder (optional)", "optional": true }
-# @raycast.argument3 { "type": "text", "placeholder": "Crate (optional)", "optional": true }
+# @raycast.argument2 { "type": "text", "placeholder": "Folder or #tags (optional)", "optional": true }
+# @raycast.argument3 { "type": "text", "placeholder": "Crate or #tags (optional)", "optional": true }
 # @raycast.packageName Music
 
 INPUT="$1"
@@ -21,6 +21,27 @@ if ! curl -s http://localhost:3000/api/auth/status > /dev/null 2>&1; then
   osascript -e 'display notification "DJ Library app is not running" with title "❌ spotify-dl"'
   exit 1
 fi
+
+# Tags: any '#tag' tokens found in either optional argument are sent to the app
+# as genre tags on the downloaded track(s). The rest of the argument stays a
+# folder or crate name.
+TAGS=$(echo "$SUBFOLDER $CRATE" | python3 -c "
+import sys, re, json
+text = sys.stdin.read()
+tags = re.findall(r'#\S+', text)
+print(json.dumps(tags))
+")
+
+# Strip '#tag' tokens out of the folder / crate fields so a value like
+# 'Demos #wip' still resolves to folder 'Demos' / crate 'Demos'.
+SUBFOLDER=$(echo "$SUBFOLDER" | python3 -c "
+import sys, re
+print(re.sub(r'#\S+', '', sys.stdin.read()).strip())
+")
+CRATE=$(echo "$CRATE" | python3 -c "
+import sys, re
+print(re.sub(r'#\S+', '', sys.stdin.read()).strip())
+")
 
 # Resolve an exact crate name to its id. If the crate doesn't exist yet it is
 # created automatically as a manual crate, so naming a new crate just works.
@@ -87,7 +108,7 @@ print(json.dumps(v) if v else 'null')
 ")
   RESPONSE=$(curl -s -X POST "http://localhost:3000/api/download-spotify-list" \
     -H "Content-Type: application/json" \
-    -d "{\"urls\": $URLS_JSON, \"subfolder\": $SUBFOLDER_JSON, \"crate_id\": $CRATE_ID}")
+    -d "{\"urls\": $URLS_JSON, \"subfolder\": $SUBFOLDER_JSON, \"crate_id\": $CRATE_ID, \"tags\": $TAGS}")
 
   BATCH_ID=$(echo "$RESPONSE" | python3 -c "
 import json,sys
@@ -140,7 +161,7 @@ print(json.dumps(v) if v else 'null')
 ")
   RESPONSE=$(curl -s -X POST "http://localhost:3000/api/download" \
     -H "Content-Type: application/json" \
-    -d "{\"query\": $QUERY_JSON, \"subfolder\": $SUBFOLDER_JSON, \"crate_id\": $CRATE_ID}")
+    -d "{\"query\": $QUERY_JSON, \"subfolder\": $SUBFOLDER_JSON, \"crate_id\": $CRATE_ID, \"tags\": $TAGS}")
 
   STATUS=$(echo "$RESPONSE" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('status','unknown'))" 2>/dev/null)
   TITLE=$(echo "$RESPONSE" | python3 -c "import json,sys; d=json.load(sys.stdin); t=d.get('track',{}); print(t.get('title','') if t else d.get('query',''))" 2>/dev/null)

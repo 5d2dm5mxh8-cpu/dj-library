@@ -5,11 +5,13 @@ const SHELL = [
   '/',
   '/index.html',
   '/manifest.webmanifest',
-  '/icon.svg'
+  '/icon.svg',
+  '/static/tag-utils.js',
+  '/static/usb-export.js'
 ];
 // Bump the version whenever the shell changes so the old cached HTML is
 // purged on activate — a stale frontend keeps serving old bugs forever.
-const CACHE = 'djlib-v9';
+const CACHE = 'djlib-v17';
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)));

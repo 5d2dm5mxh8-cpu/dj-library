@@ -19,18 +19,44 @@ step, no database server (SQLite).
   aren't offered there, since their membership comes from their rules.
   `yt-dlp` is bootstrapped and self-updated by the app, so YouTube
   breaking old builds heals itself.
-- **Crates** — manual folders plus smart crates (rules on BPM, key, genre, play count, …). Use the **Most played** rule after importing Mixxx play counts or pressing a song’s `+1` button;
-  one-click sync of a crate into Mixxx. Mixxx play counts can be imported from Settings without changing Mixxx’s database.
+- **Crates** — manual folders plus smart crates (rules on BPM, key, genre, tag,
+  …); one-click sync of a crate into Mixxx.
 - **Duplicates** — same-name / same-song detection that understands Finder's
   `(1)` suffixes, with a manual merge tool for anything the scan misses.
 - **Transitions** — link songs together as "mix A into B" notes (or text-only
-  targets), see a song's incoming/outgoing transitions, export everything as a
-  CSV or printable setlist, and sync the notes into Mixxx track comments and
-  each file's ID3 comment tag — automatically.
+  targets), tag them (existing tags autocomplete as you type, and typing a new
+  one creates it), see a song's incoming/outgoing transitions, export
+  everything as a CSV or printable setlist, and sync the notes into Mixxx track
+  comments and each file's ID3 comment tag — automatically.
 - **Folder import** — Finder-style folder picker (browse + Spotlight search).
+- **Music folder switch** — relocate the library to a different folder: move the
+  tracks with you (crates and transition notes survive), adopt a
+  folder that already holds the songs, or start a fresh empty library somewhere
+  else (⚙ Settings → Music folder).
 - **Auto-scan** — watches your music folder and picks up new files instantly.
+- **Tags and genres, kept apart** — the genre field holds genres, so Mixxx's
+  Genre column, the rekordbox import and genre smart crates all read a real
+  genre. Freeform tags (`peak hour`, `tool`, `wip`) live on their own, set from
+  the metadata editor's **Tags** field, from `#tag` tokens on a download, or by
+  dropping songs on a tag-based smart crate. See
+  [Tags and genres](#tags-and-genres).
+- **Automatic genre tags** — optionally fills missing genre tags on new library
+  tracks; existing genre tags are never replaced. For the library you already
+  have, **Tools → Clean up metadata → “♪ Fill missing genres…”** scans every
+  untagged track in one click and shows the proposed genre for review, with the
+  same Min-confidence choice as the metadata cleanup (it starts at high) — you
+  accept each genre before it is written. Genres come from the most precise
+  source available (see [Genre sources](#genre-sources)); each proposal shows
+  which one it came from. It fills blank genres only and records no cleanup
+  decision, so a later full metadata cleanup still revisits those tracks. To fill
+  the whole library without reviewing each one, the **Background genre backfill**
+  does the same lookups in the background and writes genres as it goes (paced,
+  cancellable, and resumable).
 - **DJ-software picker** — tell the app which DJ software you use (⚙ Settings)
   and the UI, sync buttons, workflow hints and the intro guide adapt to it.
+- **USB/SD export modes** — choose a Rekordbox handoff, Engine DJ handoff or a
+  software-free audio copy; export the full library, one crate or every crate
+  to a writable mounted USB drive or SD card. Existing media is never erased.
 - **Auto-export** — a `rekordbox.xml` file is kept always-current on disk after
   every change, ready to import into Rekordbox, Serato, DJUCED or Engine DJ.
 
@@ -259,18 +285,115 @@ for the values below.
 
 | Key | Purpose |
 | --- | --- |
-| `music_dir` | Absolute path to your music folder (the app scans and watches this) |
+| `music_dir` | Absolute path to your music folder (the app scans and watches this). Change it in ⚙ Settings → **Music folder** — tracks are moved or the library is re-pointed, and database paths are rewritten so nothing becomes a ghost. Editing the file by hand just changes where the app looks next launch. |
+| `library_name` | Optional display name shown in the app header and browser tab (changeable in ⚙ Settings → **Library name**). Cosmetic only — files stay put, so DJ software watching the folder is unaffected. |
 | `spotify_client_id` | Spotify app Client ID — **optional**; only the downloader needs it |
 | `spotify_client_secret` | Spotify app Client Secret — **optional** |
+| `discogs_token` | Discogs personal access token — **optional**; genres work without it, but a free token raises the Discogs rate limit from 25 to 60 requests/minute |
 | `ffmpeg_path` | Path to ffmpeg; defaults to `/opt/homebrew/bin/ffmpeg` |
 | `rekordbox_export_path` | Where the always-current `rekordbox.xml` is written (changeable in ⚙ Settings) |
 | `djs_software` | Your DJ software: `mixxx`, `rekordbox`, `serato`, `djuced`, `engine`, `none`, or `""` (not chosen yet) — set from the ⚙ Settings tab |
 | `auto_sync_mixxx` | `true`/`false` — whether new songs are automatically pushed into Mixxx (toggle in ⚙ Settings) |
-| `auto_sync_mixxx_plays` | `true`/`false` — import Mixxx play counts during library activity, throttled to once per minute and only when Mixxx is closed |
+| `auto_genre_backfill` | `true`/`false` — whether the whole-library genre backfill runs automatically after each library scan and when new files land (toggle in ⚙ Settings) |
 | `key_display` | How keys are shown: `camelot` (1A/3B) or `notation` (Am/Bbm) — display-only, stored keys are untouched (⚙ Settings) |
-
-Smart crates can also use **Most played** (`play_count ≥ N`) or **Least played** (`play_count ≤ N`) rules.
 | `auto_install_python` | `true`/`false` — whether install.command offers to auto-install Python when it's missing (⚙ Settings) |
+
+## Tags and genres
+
+These are two different things, and the app keeps them apart.
+
+A **genre** is what DJ software filters on, so it is what lands in each file's
+genre tag (`TCON`): Mixxx shows it in its Genre column, and the
+`rekordbox.xml` export writes it as the `Genre` attribute that Rekordbox,
+Serato, DJUCED and Engine DJ import. The library's genre filter and any smart
+crate rule on the genre field read that same value.
+
+A **tag** is a freeform label you put on tracks yourself — `peak hour`, `tool`,
+`wip`. Tags never go into the genre field. They live in the app's own tag
+tables and travel inside the `[DJ Library]` block of each file's comment,
+alongside that track's transition notes:
+
+```
+[DJ Library]
+Tags: peak hour, tool
+→ Another Track — Artist (6A, 124 BPM)
+[/DJ Library]
+```
+
+That block is what Mixxx shows in its **Comments** column, so your tags are
+visible while you play without ever masquerading as a genre.
+
+Where tags come from:
+
+- the metadata editor's **Tags** field (one track or a whole selection; the
+  field shows the song's own tags, so clearing it removes them),
+- `#tag` tokens on a download — the Raycast script's `#peak hour #tool` syntax,
+  or the download API's `tags` field,
+- dropping songs onto a **smart crate whose rules use tags** (its genres go to
+  the genre field, its tags to the tags), and
+- importing a file that already carries a `Tags:` line (so tags survive moving
+  a track to another machine).
+
+**Sorting out what you already have.** **Tools → Genres & tags → Separate tags
+from genres** lists tokens that look like tags rather than genres: anything
+still marked with `#`, plus genres carried by only one or two tracks — usually a
+one-off or a typo. Each row offers **Move to tags** or **Keep as genre**, and
+nothing moves until you choose. A library whose tags used to sit on the genre
+field (`Deep House; #tool`) is separated automatically at startup: the marked
+token becomes a tag and the genre field keeps the genre.
+
+## Genre sources
+
+Missing genres are looked up in the two keyless databases that know a track —
+**Discogs release styles** and **MusicBrainz genres** — and their answers are
+scored together rather than the first one that responds winning:
+
+1. **Discogs release styles** — the vocabulary DJs actually filter on
+   (*Tech House*, *Progressive House*, *Melodic Techno*), attached per release
+   rather than per artist. Free and keyless; add a `discogs_token` for a higher
+   rate limit.
+2. **MusicBrainz** — free, keyless, curated genres. Sparser for underground and
+   remix releases, and rate-limited to one request per second.
+3. **Spotify artist genres** — the broadest fallback (*edm*, *house*), consulted
+   only when neither database has anything for the track, and the only source
+   that needs Spotify credentials.
+
+When Discogs and MusicBrainz agree, the shared genre wins and the proposal is
+credited to both (*Discogs + MusicBrainz*). When they disagree, the most
+DJ-recognisable and then most specific name wins — a subtype like *Progressive
+House* beats the bare umbrella *House* — with the per-release Discogs style
+breaking an exact tie. Every proposal shows its source, so you can judge how
+much to trust it before accepting.
+
+### Whole-library backfill
+
+Reviewing hundreds of proposals by hand is slow, so **Tools → Clean up metadata
+→ Background genre backfill → Start** works through every track with no genre on
+its own. It is deliberately:
+
+- **paced** — lookups go through the same rate limiter as the review tool, so a
+  large library never trips Discogs' limit (add a `discogs_token` to roughly
+  halve the time);
+- **resumable** — a track is marked once it has been looked up, so Cancel,
+  quitting the app, or a crash keeps the work already done and the next Start
+  continues with the tracks still outstanding — nothing is looked up twice;
+- **conservative** — it writes a genre only where one is missing and never
+  touches any other tag, and a track with no findable genre is left alone rather
+  than guessed at.
+
+The panel shows progress (looked up / filled / left, plus a rough time estimate)
+and a Cancel button; the job runs in the background, so you can keep using the
+app while it works.
+
+**Sweeping automatically.** Turn on **Clean up metadata → Sweep genres after
+scans** (config `auto_genre_backfill`) and the backfill starts on its own
+after every library scan — including the scan at launch — and whenever a new
+file lands in the watched folder or a folder import finishes. Every track still
+missing a genre is swept up, so downloads and Finder drops get tagged without
+pressing Start. It is a no-op while a sweep is already running or when nothing
+is outstanding, and a sweep it starts can still be Canceled. Off by default:
+since each outstanding track costs a paced Discogs/MusicBrainz lookup, a large
+library takes a while to work through.
 
 ## Spotify setup (optional, for the downloader)
 
@@ -305,6 +428,52 @@ startup, watches it for changes, and can auto-start via LaunchAgent:
 - Transition notes sync into Mixxx track comments automatically as you add or
   edit them.
 
+## USB export modes
+
+Open **Tools → USB export** and choose the mode that matches your setup, what
+part of the library to take, and a writable mounted USB drive or SD card under
+`/Volumes`. The app creates a new
+`DJ Library Export …` folder; it never formats the media or replaces an older
+export.
+
+- **Pioneer / AlphaTheta — Rekordbox XML handoff:** copies the selected audio
+  and writes a `rekordbox.xml` pointing at the USB copies. Crates in this XML
+  become playlists in Rekordbox, not physical crate folders. Import the XML,
+  then export/prepare the USB in Rekordbox. Use Rekordbox 7.2.11+ when you need
+  both older Device Library and newer OneLibrary-compatible players; the model
+  and firmware decide which library format it reads. DJ Library does not create
+  cue points, grids, or the proprietary player database.
+- **Denon / Engine DJ — XML handoff:** the Rekordbox XML is an import starting
+  point; its crates become Engine playlists, not guaranteed audio folders.
+  Import the collection in Engine DJ, then use Sync Manager to prepare the
+  Engine drive. Choose one crate or import all crates according to the workflow
+  you want. DJ Library never writes Engine's proprietary database.
+- **Audio files only:** copies audio without a DJ desktop app, with M3U8
+  playlists, a CSV catalogue and a README. Choose either one copy per track in
+  library-relative folders, or real folders per crate (shared tracks are
+  duplicated; uncrated full-library tracks are grouped together in
+  `Crates/Uncrated`). One-crate,
+  selected-crate and all-crates exports can choose either layout; crate-folder
+  layout is preselected for crate exports. The **Export entire library** action
+  keeps the chosen layout and, in crate-folder mode, puts all uncrated songs
+  together in `Crates/Uncrated`. Folder browsing and M3U8 playback depend
+  on the player; compatible CDJs can browse folders without a Rekordbox
+  database, but playlists, search and performance data vary by model/firmware.
+
+Choose **the entire library**, **one crate**, or **all crates**. Smart crates
+are evaluated when the export is made; empty crates are reported in results
+without creating empty audio folders. Physical crate-folder layouts are only for
+audio-copy exports and are not guaranteed by native-software exports. A general
+M3U8 and one M3U8 per crate reference the copied files. These are portable
+playlists, not a format every player supports. Space estimates include duplicate
+copies before confirmation. Empty crates produce playlists but no empty audio
+folders. Nothing is converted, formatted, or overwritten.
+
+For the supported workflows, see [AlphaTheta’s current USB library format
+compatibility notice](https://alphatheta.com/en/information/important-notice-for-customers-using-usb-devices-with-our-dj-equipment/),
+[Denon DJ’s Rekordbox-to-Engine import guide](https://support.denondj.com/en/support/solutions/articles/69000798942-how-to-import-a-rekordbox-collection-into-engine-dj-playlists-hot-cues-loops-beat-grid-)
+and [Engine DJ’s USB export guide](https://support.enginedj.com/support/solutions/articles/69000844056-engine-dj-adding-music-and-exporting-to-a-drive).
+
 ## Syncing with your DJ software
 
 The app keeps a **`rekordbox.xml` file that is always current** — every change
@@ -318,6 +487,12 @@ Where it lives: `~/.dj-library/rekordbox.xml` by default — change it anytime i
 **⚙ Settings → Rekordbox export file** (pick a folder; the app writes
 `rekordbox.xml` inside it). Point it at a synced folder (Dropbox / iCloud /
 network share) when your DJ software runs on a different computer.
+
+**You never have to download-and-replace this file by hand.** In the Tools tab,
+**↻ Refresh live rekordbox.xml** rewrites it in place right now and tells you
+where it landed; **⬇ Download a copy** is only for carrying the file to another
+machine. Since the file itself is always current, the only thing your DJ
+software ever needs is a path pointing at it.
 
 Per-software workflow (also shown inside the app in ⚙ Settings → guide, and in
 the first-run intro):
@@ -350,6 +525,14 @@ name, a whole pasted list of Spotify track URLs, or a Spotify playlist link
 **creates it** (as a manual crate) and downloads into it; naming a smart crate
 shows a warning instead, since downloads can't be added to one.
 
+You can also add **tags**: put `#tag` tokens in either optional field
+(e.g. `Demos #wip` as the folder, or `#peak-hour #tool #groove` as the
+crate field). Tags are stored as tags — never as the genre (see
+[Tags and genres](#tags-and-genres)) — so they stay out of Mixxx's Genre
+column, smart crates can filter on them by name, and no metadata cleanup can
+ever overwrite them. Re-downloading something you already own with a tag
+stamps the tag onto it.
+
 To install:
 
 1. Copy the script into your Raycast scripts folder:
@@ -374,9 +557,18 @@ must be running (it is, if you installed the LaunchAgent).
 ## Project layout
 
 ```
-app.py               Flask backend (API, scanning, downloader, DJ-software sync)
-static/index.html    Single-page frontend (no build step)
+app.py               Flask application, library APIs, scanning, downloader and DJ-software sync
+usb_export_routes.py USB-export HTTP boundary; delegates to the app-owned exporter service
+usb_export.py        USB-export planning, mounted-volume checks, file writing and job lifecycle
+static/index.html    Single-page frontend shell and existing application UI (no build step)
+static/tag-utils.js  Tag helpers shared by the UI (parsing, crate rules, genre merge)
+static/usb-export.js USB-export UI controller and progress polling
 install.sh           LaunchAgent installer for auto-start
+
+USB export data flows from the UI controller to the Flask blueprint, then to a
+single lazily initialized `USBExporter` stored in `app.extensions`. The service
+is the sole owner of the in-process export job state; routes only parse requests
+and shape responses.
 config.example.json  Sanitized config template
-raycast/spotify-dl.sh  Raycast script: quick download with crate auto-create
+raycast/spotify-dl.sh  Raycast script: quick download with crate auto-create and #tags
 ```

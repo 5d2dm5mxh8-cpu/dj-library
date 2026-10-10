@@ -6,12 +6,17 @@ import threading
 import subprocess
 import hashlib
 import re
+import time
 import io
 import csv
 import html
 import queue
 import urllib.request
 import mimetypes
+import shutil
+from datetime import datetime
+import usb_export as usb_export_module
+import usb_export_routes
 from pathlib import Path
 from flask import Flask, jsonify, request, send_from_directory, send_file, Response
 from watchdog.observers import Observer
@@ -49,7 +54,6 @@ DJS_SOFTWARE = _config.get("djs_software", "")
 # Whether newly-added songs are auto-pushed into Mixxx's library (Settings
 # tab toggle; default on).
 AUTO_SYNC_MIXXX = bool(_config.get("auto_sync_mixxx", True))
-AUTO_SYNC_MIXXX_PLAYS = bool(_config.get("auto_sync_mixxx_plays", True))
 # How musical keys are shown: "camelot" wheel (1A/3B) or "notation"
 # (Am/Bbm). Display-only -- stored keys are never rewritten.
 KEY_DISPLAY = _config.get("key_display", "camelot")
@@ -62,25 +66,47 @@ AUTO_INSTALL_PYTHON = bool(_config.get("auto_install_python", True))
 # applied straight away; weaker ones are left for the manual review tool
 # (see auto_cleanup_download).
 AUTO_CLEANUP_METADATA = bool(_config.get("auto_cleanup_metadata", False))
+# Fill empty genre tags for newly added tracks from their matched genre sources
+# (Discogs and MusicBrainz, scored together with Spotify as a fallback; see
+# resolve_genre). Existing genres and user-entered tags are never replaced by
+# this setting.
+AUTO_SPOTIFY_GENRE = bool(_config.get("auto_spotify_genre", False))
+# Sweep the whole-library genre backfill automatically after each library scan
+# (and when new files land in the watched folder), so tracks that arrive with no
+# genre are filled without pressing Start. Off by default: the sweep makes a
+# paced Discogs/MusicBrainz lookup per outstanding track, so a big library takes
+# a while (see start_genre_backfill).
+AUTO_GENRE_BACKFILL = bool(_config.get("auto_genre_backfill", False))
+# Optional free Discogs personal access token. Discogs needs no key, but a
+# token raises its rate limit from 25 to 60 requests/minute for the genre
+# lookups (see _discogs_genre).
+DISCOGS_TOKEN = str(_config.get("discogs_token", "")).strip()
+# Optional display name for the library (shown in the app header and the
+# browser tab). Purely cosmetic -- files stay where they are, so DJ software
+# that watches the same folder is never affected.
+LIBRARY_NAME = str(_config.get("library_name", "")).strip()[:60]
 
 
 def _config_dict():
     """The settings the frontend needs, as a dict (shared by GET + POST)."""
     return {'music_dir': MUSIC_DIR,
+            'music_dir_changing': _music_dir_job['active'],
             'rekordbox_export_path': REKORDBOX_EXPORT_PATH,
             'djs_software': DJS_SOFTWARE,
             'auto_sync_mixxx': AUTO_SYNC_MIXXX,
-            'auto_sync_mixxx_plays': AUTO_SYNC_MIXXX_PLAYS,
             'key_display': KEY_DISPLAY,
             'auto_install_python': AUTO_INSTALL_PYTHON,
-            'auto_cleanup_metadata': AUTO_CLEANUP_METADATA}
+            'auto_cleanup_metadata': AUTO_CLEANUP_METADATA,
+            'auto_spotify_genre': AUTO_SPOTIFY_GENRE,
+            'auto_genre_backfill': AUTO_GENRE_BACKFILL,
+            'library_name': LIBRARY_NAME}
 
 
 def _save_config(updates):
     """Merges `updates` into config.json (preserving existing keys, including
     the Spotify secrets) and refreshes the affected module-level settings.
     Only settings that can change at runtime are updated here."""
-    global _config, REKORDBOX_EXPORT_PATH, DJS_SOFTWARE, AUTO_SYNC_MIXXX, AUTO_SYNC_MIXXX_PLAYS, KEY_DISPLAY, AUTO_INSTALL_PYTHON, AUTO_CLEANUP_METADATA
+    global _config, MUSIC_DIR, REKORDBOX_EXPORT_PATH, DJS_SOFTWARE, AUTO_SYNC_MIXXX, KEY_DISPLAY, AUTO_INSTALL_PYTHON, AUTO_CLEANUP_METADATA, AUTO_SPOTIFY_GENRE, AUTO_GENRE_BACKFILL, LIBRARY_NAME
     path = os.path.expanduser("~/.dj-library/config.json")
     data = dict(_config)
     data.update(updates)
@@ -93,14 +119,286 @@ def _save_config(updates):
         DJS_SOFTWARE = updates['djs_software']
     if 'auto_sync_mixxx' in updates:
         AUTO_SYNC_MIXXX = bool(updates['auto_sync_mixxx'])
-    if 'auto_sync_mixxx_plays' in updates:
-        AUTO_SYNC_MIXXX_PLAYS = bool(updates['auto_sync_mixxx_plays'])
     if 'key_display' in updates:
         KEY_DISPLAY = updates['key_display']
     if 'auto_install_python' in updates:
         AUTO_INSTALL_PYTHON = bool(updates['auto_install_python'])
     if 'auto_cleanup_metadata' in updates:
         AUTO_CLEANUP_METADATA = bool(updates['auto_cleanup_metadata'])
+    if 'auto_spotify_genre' in updates:
+        AUTO_SPOTIFY_GENRE = bool(updates['auto_spotify_genre'])
+    if 'auto_genre_backfill' in updates:
+        AUTO_GENRE_BACKFILL = bool(updates['auto_genre_backfill'])
+    if 'library_name' in updates:
+        LIBRARY_NAME = str(updates['library_name']).strip()[:60]
+    if 'music_dir' in updates:
+        # music_dir is normally changed through the /api/library/folder switch
+        # (which also relocates/relinks the tracks); _save_config just keeps
+        # the module global in sync with whatever config.json now says.
+        MUSIC_DIR = os.path.expanduser(updates['music_dir'])
+
+# -- WATCHER -----------------------------------------------------------------
+
+_watcher = None
+_watcher_lock = threading.Lock()
+
+def _start_watcher():
+    """(Re)points the folder watcher at the current MUSIC_DIR. Called at startup
+    and again after every music-folder switch, so newly dropped files are
+    always picked up no matter where the library lives now."""
+    global _watcher
+    with _watcher_lock:
+        if _watcher is not None:
+            try: _watcher.stop()
+            except Exception: pass
+            try: _watcher.join(timeout=2)
+            except Exception: pass
+        if not os.path.isdir(MUSIC_DIR):
+            _log(f"Watcher: music folder missing, not watching: {MUSIC_DIR}")
+            _watcher = None
+            return
+        _watcher = Observer()
+        _watcher.schedule(MusicFolderHandler(), MUSIC_DIR, recursive=True)
+        _watcher.start()
+        _log(f"Watcher: watching {MUSIC_DIR}")
+
+# -- MUSIC FOLDER SWITCH ------------------------------------------------------
+# Lets you relocate the library to a different folder -- either by MOVING the
+# files to a new folder, or by ADOPTING a folder that already holds the tracks
+# ("this folder has songs in it, make it the library").
+#
+# Switching is deliberately not just a config edit: the songs table matches
+# rows by absolute filepath, so after a plain path change the DB would hold a
+# full catalog of ghosts and rescan the new folder from scratch, losing every
+# crate membership and transition link. Instead the switch runs in
+# a background job that rewrites the DB paths along with the move.
+#
+# Two switches in a row share the same job id (a constant), so the frontend
+# can poll one URL regardless of how many switches happened this session --
+# the newest job simply replaces the older one.
+
+MUSIC_DIR_JOB_ID = 'music-dir-switch'
+
+# Dict access stays atomic under CPython's GIL (each handler only mutates
+# whole keys), so this needs no extra lock -- same as download_status.
+_music_dir_job = {'active': False}
+
+
+def _find_old_song_prefixes(base_dir):
+    """Distinct directory prefixes that DB song paths sit under. Normally just
+    the old library folder, but a previous switch that moved only a subset of
+    the files can leave rows pointing elsewhere -- those still get the same
+    rewrite treatment so no song is ever left behind as a ghost. The folder
+    being switched AWAY from arrives as a parameter, because MUSIC_DIR has
+    already been flipped to the new folder by the time this runs."""
+    base = os.path.abspath(base_dir).rstrip(os.sep)
+    with get_db() as db:
+        rows = db.execute('SELECT filepath FROM songs').fetchall()
+    prefixes = set()
+    for r in rows:
+        folder = os.path.dirname(os.path.abspath(r['filepath']))
+        while True:
+            prefixes.add(folder)
+            parent = os.path.dirname(folder)
+            if parent == folder:
+                break
+            folder = parent
+    # Only folders at or BELOW the old library root qualify. Ancestors of the
+    # root (e.g. ~/Music for a library at ~/Music/DJ) must NOT match: with
+    # them in the set, a stray row elsewhere in the tree gets rewritten to a
+    # garbage path and then purged by the rescan, losing its crate memberships.
+    return [p for p in prefixes if p == base or p.startswith(base + os.sep)]
+
+
+def _music_dir_worker(old_dir, new_dir, mode, create, delete_old):
+    """Background worker for a music-folder switch.
+
+    old_dir       -- the folder the library is switching AWAY from (passed
+                     explicitly: the route flips config + MUSIC_DIR before
+                     this thread starts).
+    mode 'move'   -- tracks still live under the old folder: move them to the
+                     new one, keeping every relative subfolder, then rewrite
+                     the DB paths.
+    mode 'adopt'  -- the tracks are already in the new folder: verify they are
+                     there, then rewrite the DB paths.
+    mode 'fresh'  -- brand-new library: the old files stay where they are, the
+                     catalog is cleared (crates and transitions survive), so
+                     the new folder starts empty.
+    create        -- os.makedirs the new folder first (new-library flow).
+    delete_old    -- remove the old folder tree afterwards (move mode only;
+                     ignored for fresh, where the old folder still holds files).
+    """
+    global MUSIC_DIR
+    old_dir = os.path.abspath(old_dir).rstrip(os.sep)
+    new_dir_abs = os.path.abspath(new_dir).rstrip(os.sep)
+    status = download_status[MUSIC_DIR_JOB_ID]
+    moved, missing = 0, 0
+
+    try:
+        os.makedirs(new_dir_abs, exist_ok=True)
+
+        if mode == 'move' and os.path.isdir(old_dir) and old_dir != new_dir_abs:
+            # Precompute the full prefix map once -- Path.replace refuses to
+            # overwrite existing files, which is exactly the safety we want.
+            renames = []
+            for root, dirs, files in os.walk(old_dir):
+                dirs[:] = [d for d in dirs if not d.startswith('.')]
+                for fname in files:
+                    src = os.path.join(root, fname)
+                    rel = os.path.relpath(src, old_dir)
+                    dst = os.path.join(new_dir_abs, rel)
+                    if os.path.exists(dst):
+                        status['failed'] = (f"Cannot move: '{rel}' already exists in "
+                                            "the new folder. No files were moved -- "
+                                            "empty the new folder (or merge the copies "
+                                            "by hand) and try again.")
+                        return
+                    renames.append((src, dst, rel))
+            status['total'] = len(renames)
+            for src, dst, rel in renames:
+                try:
+                    os.makedirs(os.path.dirname(dst), exist_ok=True)
+                    Path(src).replace(dst)
+                    moved += 1
+                    status['done'] = moved
+                except OSError as e:
+                    _log(f"Music move failed {src} -> {dst}: {e}")
+                    missing += 1
+
+        # Rewrite the DB paths. Every row under a known old prefix gets the
+        # same old->new surgery; rows under prefixes that were never moved
+        # (partial previous switches) keep their already-correct paths. The
+        # LONGEST matching prefix wins: the candidate set also contains
+        # ancestors of old_dir, and matching '/tmp' instead of
+        # '/old/library' would send every path to a garbage destination.
+        prefix_map = [(p, new_dir_abs + p[len(old_dir):]) for p in _find_old_song_prefixes(old_dir)]
+        prefix_map.sort(key=lambda pm: len(pm[0]), reverse=True)
+        with get_db() as db:
+            rows = db.execute('SELECT id, filepath FROM songs').fetchall()
+            updates = []
+            for r in rows:
+                old_path = os.path.abspath(r['filepath'])
+                for p, np in prefix_map:
+                    if old_path == p or old_path.startswith(p + os.sep):
+                        rel = old_path[len(p):].lstrip(os.sep)
+                        updates.append((os.path.join(np, rel), r['id']))
+                        break
+                else:
+                    # Song lived somewhere outside the old prefixes -- leave it
+                    # alone; it was never part of the moved set.
+                    continue
+            for fp, sid in updates:
+                db.execute('UPDATE songs SET filepath=? WHERE id=?', (fp, sid))
+            db.commit()
+        _log(f"Music folder switched: {old_dir} -> {new_dir_abs} "
+             f"({moved} files moved, {len(updates)} DB rows rewritten, {missing} failed)")
+
+        if delete_old and mode != 'fresh' and old_dir != new_dir_abs and os.path.isdir(old_dir):
+            try:
+                shutil.rmtree(old_dir)
+            except OSError as e:
+                _log(f"Old folder cleanup skipped: {e}")
+
+        # The watcher must follow the new folder before the job is marked
+        # done, otherwise files dropped immediately after the switch are missed.
+        if mode == 'fresh':
+            # Fresh start: nothing was moved, so every rewritten path is now a
+            # ghost -- clear the catalog (crate memberships and transition
+            # links go with it; the crates and folders themselves stay).
+            with get_db() as db:
+                ids = [r['id'] for r in db.execute('SELECT id FROM songs').fetchall()]
+                _delete_song_rows(db, ids)
+                db.commit()
+            _log(f"Fresh library in {new_dir_abs}: cleared {len(ids)} songs "
+                 "(crates and transitions kept)")
+
+        MUSIC_DIR = new_dir_abs
+        _start_watcher()
+        queue_auto_export()
+        # New files may have been uncovered (adopt) or brought over (move):
+        # pull them into the catalog without waiting for the next startup scan.
+        threading.Thread(target=scan_library, daemon=True).start()
+        status.update({'done': moved, 'moved': moved, 'missing': missing,
+                       'status': 'success'})
+    except Exception as e:
+        _log(f"Music folder switch failed: {e}")
+        status.update({'status': 'failed', 'failed': str(e)})
+    finally:
+        _music_dir_job['active'] = False
+
+
+@app.route('/api/library/folder', methods=['POST'])
+def switch_music_dir():
+    """Switches the library to a different folder. Body:
+
+        {"folder": "/new/path",             (required)
+         "mode": "move"|"adopt"|"fresh",   (default: move)
+         "create": true,                    (create the folder if missing)
+         "delete_old": false}               (remove the old folder when done,
+                                             move mode only)
+
+    'move'  = take my tracks with me (the files are moved, DB paths rewritten;
+              playlists and transition notes all survive).
+    'adopt' = this folder already holds the tracks -- just make it the library
+              (every DB path is rewritten to the new folder, so nothing is
+              re-scanned from scratch and crate memberships survive).
+    'fresh' = start a brand-new library here: the old files stay put, the
+              catalog is cleared (crates and transitions survive).
+    """
+    global MUSIC_DIR
+    if _music_dir_job['active']:
+        return jsonify({'error': 'A music-folder switch is already running'}), 409
+    data = request.json or {}
+    raw = str(data.get('folder', '')).strip()
+    if not raw:
+        return jsonify({'error': 'Folder path required'}), 400
+    new_dir = os.path.abspath(os.path.expanduser(raw))
+    if new_dir == '/':
+        return jsonify({'error': 'Refusing to use / as the library'}), 400
+    if not os.path.isdir(new_dir):
+        if not data.get('create'):
+            return jsonify({'error': "Folder does not exist (pick an existing folder, or use 'Start an empty new library' to create one)"}), 400
+        try:
+            os.makedirs(new_dir)
+        except OSError as e:
+            return jsonify({'error': f'Could not create folder: {e}'}), 400
+    mode = data.get('mode') or 'move'
+    if mode not in ('move', 'adopt', 'fresh'):
+        return jsonify({'error': 'mode must be "move", "adopt" or "fresh"'}), 400
+    if mode == 'adopt' and not any(
+            f.lower().endswith(AUDIO_EXTS) for f in os.listdir(new_dir)):
+        return jsonify({'error': 'That folder has no audio files in it -- nothing to adopt'}), 400
+
+    old_dir = os.path.abspath(MUSIC_DIR).rstrip(os.sep)
+    if new_dir == old_dir:
+        return jsonify({'error': 'That is already the library folder'}), 400
+    # Guard against nesting: with the new folder inside the old one, moving
+    # files into the new folder moves them into themselves; with the old
+    # folder inside the new one, "delete old folder" would eat the library.
+    if new_dir.startswith(old_dir + os.sep):
+        return jsonify({'error': 'The new folder is inside the current library folder'}), 400
+    if old_dir.startswith(new_dir + os.sep):
+        return jsonify({'error': 'The current library folder is inside the new folder'}), 400
+
+    _music_dir_job['active'] = True
+    download_status[MUSIC_DIR_JOB_ID] = {
+        'status': 'moving', 'total': 0, 'done': 0,
+        'moved': 0, 'missing': 0, 'failed': None
+    }
+    # Flip config + MUSIC_DIR first: the switch survives even if the process
+    # dies mid-move (files can be finished by a second switch or by hand).
+    _save_config({'music_dir': new_dir})
+    threading.Thread(target=_music_dir_worker,
+                     args=(old_dir, new_dir, mode, bool(data.get('create')),
+                           bool(data.get('delete_old'))),
+                     daemon=True).start()
+    return jsonify({'ok': True, 'job_id': MUSIC_DIR_JOB_ID,
+                    'music_dir': new_dir, 'old_dir': old_dir})
+
+
+@app.route('/api/library/switch-status/<job_id>')
+def music_dir_switch_status(job_id):
+    return jsonify(download_status.get(job_id, {'status': 'unknown'}))
 
 # -- DATABASE --------------------------------------------------------------
 
@@ -118,7 +416,6 @@ def init_db():
             title TEXT, artist TEXT, album TEXT, year TEXT, genre TEXT,
             duration_seconds REAL, file_size_bytes INTEGER,
             bpm REAL, musical_key TEXT,
-            play_count INTEGER DEFAULT 0,
             file_hash TEXT, spotify_id TEXT,
             added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )''')
@@ -155,8 +452,18 @@ def init_db():
         )''')
         db.commit()
         for col in ['album TEXT','year TEXT','genre TEXT','file_size_bytes INTEGER',
-                    'bpm REAL','musical_key TEXT','play_count INTEGER DEFAULT 0',
-                    "cleanup_scanned_at TIMESTAMP", "cleanup_decision TEXT"]:
+                    'bpm REAL','musical_key TEXT',
+                    "cleanup_scanned_at TIMESTAMP", "cleanup_decision TEXT",
+                    # Last Spotify proposal for this track (JSON), so reopening
+                    # the cleanup panel doesn't re-query the API for matches it
+                    # already made.
+                    "cleanup_proposal_json TEXT",
+                    # When a bulk genre backfill looked this track up (whether or
+                    # not it found anything). Marks which tracks are still to do,
+                    # so the job resumes after a restart/cancel instead of
+                    # starting over -- and a track with no findable genre is not
+                    # retried forever.
+                    "genre_backfill_at TIMESTAMP"]:
             try:
                 db.execute(f'ALTER TABLE songs ADD COLUMN {col}')
                 db.commit()
@@ -171,6 +478,23 @@ def init_db():
         except: pass
         # Folders for grouping transitions in the Transitions tab. A transition
         # lives in at most one folder (folder_id NULL = "All transitions").
+        # Single-row state for the resumable "fill every missing genre" job.
+        # Persisted so progress survives an app restart: the worker picks up
+        # from the un-attempted tracks rather than starting over.
+        db.execute('''CREATE TABLE IF NOT EXISTS genre_backfill (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            status TEXT NOT NULL DEFAULT 'idle',
+            total INTEGER NOT NULL DEFAULT 0,
+            attempted INTEGER NOT NULL DEFAULT 0,
+            filled INTEGER NOT NULL DEFAULT 0,
+            current_id INTEGER,
+            current_title TEXT,
+            started_at TIMESTAMP,
+            updated_at TIMESTAMP,
+            error TEXT
+        )''')
+        db.execute('INSERT OR IGNORE INTO genre_backfill(id, status) VALUES(1, \'idle\')')
+        db.commit()
         db.execute('''CREATE TABLE IF NOT EXISTS transition_folders (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
@@ -181,6 +505,35 @@ def init_db():
             db.execute("ALTER TABLE transitions ADD COLUMN folder_id INTEGER")
             db.commit()
         except: pass
+        # Mashup tracks: a transition row with is_mashup_track=1 has the mashup
+        # itself as its SOURCE; its normal target is the OUTPUT song (where the
+        # mashup lands), and mashup_input_* names the INPUT song it blends in
+        # from -- a library song id or free text, exactly one of the pair.
+        try:
+            db.execute("ALTER TABLE transitions ADD COLUMN is_mashup_track INTEGER DEFAULT 0")
+            db.execute("ALTER TABLE transitions ADD COLUMN mashup_input_song_id INTEGER")
+            db.execute("ALTER TABLE transitions ADD COLUMN mashup_input_text TEXT")
+            db.commit()
+        except: pass
+        # Freeform tags get their own tables -- deliberately NOT the genre
+        # column. `genre` stays a real genre (Mixxx's Genre column, the
+        # rekordbox.xml Genre attribute, every smart crate built on genre),
+        # while tags travel in the file's [DJ Library] comment block. A tag
+        # exists only as long as a song carries it, and matching is
+        # case-insensitive, so "Tool" and "tool" are one tag.
+        db.execute('''CREATE TABLE IF NOT EXISTS tags (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )''')
+        db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_tags_name ON tags(lower(name))')
+        db.execute('''CREATE TABLE IF NOT EXISTS song_tags (
+            song_id INTEGER NOT NULL,
+            tag_id INTEGER NOT NULL,
+            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (song_id, tag_id)
+        )''')
+        db.commit()
 
 # -- FILE UTILS --------------------------------------------------------------
 
@@ -209,17 +562,38 @@ def get_bitrate(filepath):
 # dropped when reading tags, otherwise they pollute the genre filter.
 NOISE_GENRES = {'music', 'people & blogs'}
 
+def split_genre_tags(raw):
+    """Splits a raw genre string into (genre, tags).
+
+    A '#'-prefixed token is a TAG -- the marker the download API and the
+    Raycast script use -- and every other token is a genre. This is the single
+    place the two are told apart, so a file whose genre still carries
+    '#peak-hour' (written back when tags rode on the genre field) lands with a
+    clean genre and a real tag instead."""
+    if not raw:
+        return None, []
+    genres, tags = [], []
+    for part in str(raw).split(';'):
+        part = part.strip()
+        if not part:
+            continue
+        if part.startswith('#'):
+            tag = clean_tag(part)
+            if tag and tag.lower() not in [t.lower() for t in tags]:
+                tags.append(tag)
+            continue
+        if part.lower() in NOISE_GENRES:
+            continue
+        if part.lower() not in [g.lower() for g in genres]:
+            genres.append(part)
+    return ('; '.join(genres) or None), tags
+
 def clean_genre(genre):
-    """Strips meaningless category tags from a genre string.
-    Handles semicolon-separated multi-genre tags (e.g. 'Music; House' -> 'House')
-    and returns None if nothing meaningful remains."""
-    if not genre:
-        return None
-    parts = [p.strip() for p in genre.split(';')]
-    kept = [p for p in parts if p.lower() not in NOISE_GENRES]
-    if not kept:
-        return None
-    return '; '.join(kept)
+    """Strips meaningless category tags and freeform '#tags' from a genre string.
+    Handles semicolon-separated multi-genre values (e.g. 'Music; House' ->
+    'House') and returns None if nothing meaningful remains. Tags are dropped
+    here on purpose: the genre field is for genres only."""
+    return split_genre_tags(genre)[0]
 
 def extract_metadata(filepath):
     title=artist=album=year=genre=duration=None
@@ -261,6 +635,234 @@ def write_metadata(filepath, title=None, artist=None, album=None,
     except Exception as e:
         print(f"Tag write failed {filepath}: {e}")
         return False
+
+# -- TAGS --------------------------------------------------------------------
+# Tags (peak hour, tool, wip, ...) live in the `tags` / `song_tags` tables and
+# in the file's [DJ Library] comment block -- never in the genre field. Genre
+# has to stay a real genre: Mixxx reads it as the Genre column, the
+# rekordbox.xml Genre attribute comes from it, and smart crates filter on it.
+# Nothing here is allowed to write a tag into `genre`, or a genre into a tag.
+
+TAG_MAX_LENGTH = 40
+
+def clean_tag(name):
+    """Normalises one tag for storage: a leading '#' -- the marker the download
+    API and the Raycast script use -- is dropped, whitespace collapses, and a
+    value that reads as nothing ('#', 'Music') returns None."""
+    if name is None:
+        return None
+    tag = str(name).strip()
+    while tag.startswith('#'):
+        tag = tag[1:].strip()
+    tag = re.sub(r'\s+', ' ', tag)
+    if not tag or tag.lower() in NOISE_GENRES:
+        return None
+    return tag[:TAG_MAX_LENGTH]
+
+def parse_tag_string(value):
+    """Parses a tag field from the download API: '#house #tool' or 'house,
+    tool; peak hour' -> ['house', 'tool', 'peak hour']. Returns []"""
+    if not value or not isinstance(value, str):
+        return []
+    raw = re.split(r'[;,]|\s+#', value)
+    return [t.strip() for t in raw if t.strip()]
+
+def merge_genres(existing, genres):
+    """Adds genres to a song's ';'-separated genre string without duplicating
+    anything it already carries (case-insensitive). Genres only -- a '#tag' is
+    never merged into the genre field."""
+    parts = [p.strip() for p in (existing or '').split(';') if p.strip()]
+    for g in genres or []:
+        g = (g or '').strip()
+        if g and not g.startswith('#') and not any(p.lower() == g.lower() for p in parts):
+            parts.append(g)
+    return '; '.join(parts)
+
+def _clean_tag_list(names):
+    """Cleaned tags with case-insensitive duplicates removed, order kept."""
+    out, seen = [], set()
+    for n in (names or []):
+        t = clean_tag(n)
+        if t and t.lower() not in seen:
+            seen.add(t.lower())
+            out.append(t)
+    return out
+
+def _tag_id(db, name):
+    """The id of `name`, created on first use. Matching is case-insensitive, so
+    an existing 'Tool' is reused for 'tool' and its stored spelling wins."""
+    row = db.execute('SELECT id FROM tags WHERE lower(name)=lower(?)', (name,)).fetchone()
+    if row:
+        return row['id']
+    db.execute('INSERT INTO tags (name) VALUES(?)', (name,))
+    return db.execute('SELECT last_insert_rowid()').fetchone()[0]
+
+def _drop_orphan_tags(db):
+    """Deletes tag rows nothing carries any more -- a tag exists only as long as
+    a song is tagged with it."""
+    db.execute('DELETE FROM tags WHERE id NOT IN (SELECT tag_id FROM song_tags)')
+
+def add_song_tags(song_id, names, db=None):
+    """Links tags to one song (creating them as needed) and returns the tags the
+    song actually gained, in the order given. Idempotent, and never touches the
+    genre field."""
+    wanted = _clean_tag_list(names)
+    if not wanted:
+        return []
+    added = []
+    def run(conn):
+        if not conn.execute('SELECT 1 FROM songs WHERE id=?', (song_id,)).fetchone():
+            return False
+        for name in wanted:
+            tag_id = _tag_id(conn, name)
+            had = conn.execute('SELECT 1 FROM song_tags WHERE song_id=? AND tag_id=?',
+                               (song_id, tag_id)).fetchone()
+            conn.execute('INSERT OR IGNORE INTO song_tags (song_id, tag_id) VALUES(?,?)',
+                         (song_id, tag_id))
+            if not had:
+                added.append(name)
+        conn.commit()
+        return True
+    ok = run(db) if db is not None else _with_db(run)
+    return added if ok else []
+
+def remove_song_tags(song_id, names, db=None):
+    """Unlinks tags from one song (case-insensitive) and drops any tag no song
+    carries any more. Returns the tags that were actually removed."""
+    unwanted = _clean_tag_list(names)
+    if not unwanted:
+        return []
+    removed = []
+    def run(conn):
+        for name in unwanted:
+            row = conn.execute('SELECT id FROM tags WHERE lower(name)=lower(?)',
+                               (name,)).fetchone()
+            if not row:
+                continue
+            cur = conn.execute('DELETE FROM song_tags WHERE song_id=? AND tag_id=?',
+                               (song_id, row['id']))
+            if cur.rowcount:
+                removed.append(name)
+        _drop_orphan_tags(conn)
+        conn.commit()
+        return True
+    run(db) if db is not None else _with_db(run)
+    return removed
+
+def set_song_tags(song_id, names, db=None):
+    """Replaces one song's tags with `names` (the metadata editor's contract:
+    what you see in the field is what is saved). Returns (added, removed)."""
+    wanted = _clean_tag_list(names)
+    have = get_song_tags(song_id)
+    keep = [w.lower() for w in wanted]
+    removed = remove_song_tags(song_id, [t for t in have if t.lower() not in keep], db)
+    held = [h.lower() for h in have]
+    added = add_song_tags(song_id, [t for t in wanted if t.lower() not in held], db)
+    return added, removed
+
+def get_song_tags(song_id, db=None):
+    """One song's tags, alphabetically. Pass db to reuse an open connection
+    (callers mid-transaction would otherwise deadlock on the write lock)."""
+    def run(conn):
+        return [r['name'] for r in conn.execute(
+            'SELECT t.name FROM song_tags st JOIN tags t ON t.id=st.tag_id '
+            'WHERE st.song_id=? ORDER BY lower(t.name)', (song_id,)).fetchall()]
+    return run(db) if db is not None else _with_db(run)
+
+def tags_for_songs(song_ids):
+    """{song_id: [tag, ...]} for a page of songs -- one query for the whole
+    batch instead of one per row (the song list, the info panel and the
+    rekordbox export all need this)."""
+    ids = [i for i in (song_ids or []) if i is not None]
+    if not ids:
+        return {}
+    out = {i: [] for i in ids}
+    placeholders = ','.join('?' * len(ids))
+    with get_db() as db:
+        rows = db.execute('SELECT st.song_id, t.name FROM song_tags st '
+                          'JOIN tags t ON t.id=st.tag_id WHERE st.song_id IN '
+                          f'({placeholders}) ORDER BY lower(t.name)', ids).fetchall()
+    for r in rows:
+        out.setdefault(r['song_id'], []).append(r['name'])
+    return out
+
+def _tags_from_payload(value):
+    """Tags from an API payload: a list of tags, or a string like
+    '#tool, peak hour; wip'."""
+    if value is None:
+        return []
+    raw = list(value) if isinstance(value, (list, tuple)) else parse_tag_string(str(value))
+    return _clean_tag_list(raw)
+
+def _with_tags(songs):
+    """Attaches each song's tags to its dict, one query for the whole page."""
+    tags = tags_for_songs([s['id'] for s in songs])
+    for s in songs:
+        s['tags'] = tags.get(s['id'], [])
+    return songs
+
+def tag_song(song_id, names):
+    """Tags one song and refreshes its file comment, so the tag also reaches
+    the file (and Mixxx's comment column). Returns the tags gained."""
+    added = add_song_tags(song_id, names)
+    if added:
+        sync_song_comment(song_id)
+        queue_auto_export()
+    return added
+
+def write_file_genre(filepath, genre):
+    """Writes the cleaned genre to the file's TCON, clearing the frame when the
+    track has no genre left. write_metadata skips empty values, which would
+    otherwise leave a stale genre -- or an old '#tag' -- on disk."""
+    if genre:
+        write_metadata(filepath, genre=genre)
+        return
+    try:
+        try: id3 = ID3(filepath)
+        except ID3NoHeaderError: id3 = ID3()
+        if 'TCON' in id3:
+            del id3['TCON']
+            id3.save(filepath, v2_version=3)
+    except Exception as e:
+        print(f"Genre clear failed {filepath}: {e}")
+
+def tag_song_at_path(filepath, names):
+    """tag_song for a caller that only knows the path (the downloader's
+    already-owned shortcut)."""
+    with get_db() as db:
+        row = db.execute('SELECT id FROM songs WHERE filepath=?', (filepath,)).fetchone()
+    return tag_song(row['id'], names) if row else []
+
+def separate_genre_tags():
+    """Moves '#tag' tokens out of the genre field into the tag store.
+
+    Run once at startup (and from the Tools review screen). Idempotent, and a
+    no-op for a library whose genres are already genres: a token only moves
+    when it carries the '#' marker. Returns (songs_changed, tags_moved)."""
+    try:
+        with get_db() as db:
+            rows = db.execute("SELECT id, filepath, genre FROM songs "
+                              "WHERE genre LIKE '%#%'").fetchall()
+        songs_changed = tags_moved = 0
+        for row in rows:
+            genre, tags = split_genre_tags(row['genre'])
+            if not tags:
+                continue
+            with get_db() as db:
+                db.execute('UPDATE songs SET genre=? WHERE id=?', (genre, row['id']))
+                db.commit()
+            add_song_tags(row['id'], tags)
+            write_file_genre(row['filepath'], genre)
+            sync_song_comment(row['id'])
+            songs_changed += 1
+            tags_moved += len(tags)
+        if songs_changed:
+            queue_auto_export()
+            print(f"Tag separation: {tags_moved} tag(s) moved off {songs_changed} song(s)")
+        return songs_changed, tags_moved
+    except Exception as e:
+        print(f"Tag separation failed: {e}")
+        return 0, 0
 
 # -- SPOTIFY API -------------------------------------------------------------
 # -- OAUTH USER AUTHENTICATION -----------------------------------------------
@@ -650,9 +1252,14 @@ def scan_library():
     # up by the manual rescan button) get pushed into Mixxx in the background.
     if new_paths:
         auto_sync_new_songs(new_paths)
+        for filepath in new_paths:
+            schedule_auto_cleanup_for_path(filepath)
     # The library changed (adds or purges) -- refresh the on-disk rekordbox.xml.
     if added or purged:
         queue_auto_export()
+    # With "sweep genres after scans" on, a scan is the cue to fill any track
+    # still missing a genre. A no-op when the setting is off or nothing is left.
+    maybe_auto_genre_backfill('scan')
     return added, purged
 
 def _delete_song_rows(db, song_ids):
@@ -664,7 +1271,14 @@ def _delete_song_rows(db, song_ids):
         db.execute('DELETE FROM crate_songs WHERE song_id=?', (song_id,))
         db.execute('DELETE FROM transitions WHERE from_song_id=? OR to_song_id=?',
             (song_id, song_id))
+        # The song may also be named as a mashup input on other rows -- the
+        # ingredient is simply unset there (the row itself stays).
+        db.execute('UPDATE transitions SET mashup_input_song_id=NULL WHERE mashup_input_song_id=?',
+            (song_id,))
+        db.execute('DELETE FROM song_tags WHERE song_id=?', (song_id,))
         db.execute('DELETE FROM songs WHERE id=?', (song_id,))
+    # Tags exist only while some song carries them, so drop any left behind.
+    _drop_orphan_tags(db)
 
 def add_file_to_db(filepath):
     if not os.path.exists(filepath): return False
@@ -683,7 +1297,30 @@ def add_file_to_db(filepath):
             (filename,filepath,title,artist,album,year,genre,duration_seconds,file_size_bytes,file_hash)
             VALUES(?,?,?,?,?,?,?,?,?,?)''',
             (filename,filepath,title,artist,album,year,genre,duration,fsize,fhash))
-        db.commit(); return True
+        db.commit()
+        row = db.execute('SELECT id FROM songs WHERE filepath=?', (filepath,)).fetchone()
+    # A track arriving from another machine keeps the tags this app wrote into
+    # its [DJ Library] comment block (or its old genre-field '#tags').
+    if row:
+        add_song_tags(row['id'], _file_tags(filepath, genre))
+    return True
+
+def _file_tags(filepath, raw_genre=None):
+    """Tags carried by a file: the [DJ Library] comment block's Tags line, plus
+    any '#tag' token still sitting in its genre (pre-separation libraries). """
+    tags = list(split_genre_tags(raw_genre)[1]) if raw_genre else []
+    try:
+        try: id3 = ID3(filepath)
+        except ID3NoHeaderError: id3 = ID3()
+        for key in list(id3.keys()):
+            frame = id3[key]
+            if isinstance(frame, COMM) and frame.desc == 'DJ Library':
+                for line in str(frame).splitlines():
+                    if line.strip().lower().startswith('tags:'):
+                        tags += [t.strip() for t in line.split(':', 1)[1].split(',') if t.strip()]
+    except Exception:
+        pass
+    return _clean_tag_list(tags)
 
 # -- DOWNLOAD --------------------------------------------------------------
 
@@ -742,7 +1379,7 @@ def refresh_ytdlp():
         _log(f"YT-DLP: startup refresh failed: {e}")
 
 def do_download(query, spotify_id=None, title=None, artist=None,
-                album=None, year=None, subfolder=None, crate_id=None):
+                album=None, year=None, subfolder=None, crate_id=None, tags=None):
     output_dir = os.path.join(MUSIC_DIR, subfolder) if subfolder else MUSIC_DIR
     os.makedirs(output_dir, exist_ok=True)
     job_id = spotify_id or hashlib.md5(query.encode()).hexdigest()[:16]
@@ -752,6 +1389,9 @@ def do_download(query, spotify_id=None, title=None, artist=None,
         with get_db() as db:
             ex = db.execute('SELECT * FROM songs WHERE spotify_id=?',(spotify_id,)).fetchone()
             if ex:
+                # Already owned -- still stamp requested tags onto it so
+                # re-downloading with a tag always tags, never no-ops.
+                tag_song_at_path(ex['filepath'], tags)
                 download_status[job_id] = {'status':'duplicate','existing':dict(ex)}
                 return
 
@@ -795,6 +1435,8 @@ def do_download(query, spotify_id=None, title=None, artist=None,
                                    'SELECT ?, id FROM songs WHERE filepath=?',
                                    (crate_id, downloaded_path))
                         db.commit()
+                if tags:
+                    tag_song_at_path(downloaded_path, tags)
                 # Newly downloaded song -- push it into Mixxx in the background.
                 auto_sync_new_songs([downloaded_path])
                 queue_auto_export()
@@ -809,8 +1451,7 @@ def do_download(query, spotify_id=None, title=None, artist=None,
                         args=[downloaded_path, row['id'], spotify_id], daemon=True).start()
                     # Best-effort metadata cleanup: apply only high-confidence
                     # Spotify matches straight away; weaker ones wait for review.
-                    threading.Thread(target=auto_cleanup_download,
-                        args=[row['id']], daemon=True).start()
+                    schedule_auto_cleanup(row['id'], cleanup_download=True)
         download_status[job_id] = {'status':'success','file':downloaded_path}
         subprocess.run(['osascript','-e',
             f'display notification "Downloaded: {title or query}" with title "DJ Library"'])
@@ -822,6 +1463,13 @@ def do_download(query, spotify_id=None, title=None, artist=None,
 # -- FOLDER WATCHER ----------------------------------------------------------
 
 class MusicFolderHandler(FileSystemEventHandler):
+    # While a music-folder switch is moving files the old watcher is already
+    # detached, so this guard is normally redundant -- it just makes the short
+    # window between "folder changed in config" and "watcher restarted" safe.
+    def on_any_event(self, event):
+        if _music_dir_job['active']:
+            return
+
     def on_created(self, event):
         if event.is_directory: return
         if Path(event.src_path).suffix.lower() not in ('.mp3','.wav','.flac','.m4a'): return
@@ -849,6 +1497,10 @@ class MusicFolderHandler(FileSystemEventHandler):
             # watched folder) -- push it into Mixxx's library in the background.
             auto_sync_new_songs([filepath])
             queue_auto_export()
+            schedule_auto_cleanup_for_path(filepath)
+            # A download or Finder drop that lands with no genre gets swept up
+            # too (no-op unless the setting is on).
+            maybe_auto_genre_backfill('new file')
     def _remove(self, filepath):
         """Removes a song row (and its crate memberships) when its file is
         deleted or moved out of the watched library folder in Finder."""
@@ -867,7 +1519,21 @@ def evaluate_smart_crate(rules):
         field = r.get('field')
         op    = r.get('op')
         val   = r.get('value')
-        if field not in ('bpm','duration_seconds','genre','musical_key','artist','title','year','play_count'): continue
+        # Tags are their own field: a rule can filter on one (exact or
+        # containing) alongside the genre rules.
+        if field == 'tag':
+            if op == 'eq':
+                conditions.append('EXISTS (SELECT 1 FROM song_tags st JOIN tags t '
+                                  'ON t.id=st.tag_id WHERE st.song_id=songs.id '
+                                  'AND lower(t.name)=lower(?))')
+                params.append(str(val).strip())
+            elif op == 'contains':
+                conditions.append('EXISTS (SELECT 1 FROM song_tags st JOIN tags t '
+                                  'ON t.id=st.tag_id WHERE st.song_id=songs.id '
+                                  'AND lower(t.name) LIKE ?)')
+                params.append(f'%{str(val).strip().lower()}%')
+            continue
+        if field not in ('bpm','duration_seconds','genre','musical_key','artist','title','year'): continue
         if op == 'gte':      conditions.append(f'COALESCE({field}, 0) >= ?'); params.append(val)
         elif op == 'lte':    conditions.append(f'COALESCE({field}, 0) <= ?'); params.append(val)
         elif op == 'eq':     conditions.append(f'{field} = ?');  params.append(val)
@@ -875,7 +1541,6 @@ def evaluate_smart_crate(rules):
             conditions.append(f'{field} LIKE ?'); params.append(f'%{val}%')
         elif op == 'gt':     conditions.append(f'COALESCE({field}, 0) > ?'); params.append(val)
         elif op == 'lt':     conditions.append(f'COALESCE({field}, 0) < ?'); params.append(val)
-        elif op == 'least_played': conditions.append('COALESCE(play_count, 0) <= ?'); params.append(val)
     if not conditions: return []
     where = ' AND '.join(conditions)
     with get_db() as db:
@@ -883,7 +1548,7 @@ def evaluate_smart_crate(rules):
     return [dict(r) for r in rows]
 
 # -- MIXXX CRATE SYNC ---------------------------------------------------------
-# Mixxx stores its entire library (tracks, crates, playlists, playcounts) in a
+# Mixxx stores its entire library (tracks, crates, playlists) in a
 # single SQLite database file. A "crate" in Mixxx is really just a table that
 # links crate IDs to track IDs from Mixxx's own `library` table -- so for us to
 # add a song to a Mixxx crate, that song must already exist in Mixxx's library
@@ -897,7 +1562,7 @@ def evaluate_smart_crate(rules):
 
 import glob
 import shutil
-import datetime
+# (datetime comes from the top-of-file "from datetime import datetime")
 
 def find_mixxx_db():
     """Mixxx stores its database in a per-user Application Support folder."""
@@ -935,7 +1600,7 @@ def sync_crate_to_mixxx(crate_name, song_filepaths):
     if not _mixxx_db_accessible(db_path):
         return {'ok': False, 'error': _mixxx_error_hint(OSError('unable to open database file'))}
 
-    backup_path = db_path + '.backup-' + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    backup_path = db_path + '.backup-' + datetime.now().strftime("%Y%m%d-%H%M%S")
     shutil.copy2(db_path, backup_path)
 
     try:
@@ -1023,20 +1688,40 @@ def _mixxx_db_accessible(db_path):
 # while Mixxx is open, back up the DB before writing, restore on failure.
 TRANSITION_COMMENT_OPEN  = '[DJ Library]'
 TRANSITION_COMMENT_CLOSE = '[/DJ Library]'
+# Tags ride in the same block: one labelled line above the transition notes, so
+# a single comment section keeps Mixxx, the rekordbox.xml Comments field and the
+# file itself in step with one writer.
+TAG_COMMENT_PREFIX = 'Tags:'
 
 # Serializes Mixxx-DB writes so the auto-sync (fired from every transition
 # add/edit/delete) and the manual button can never race each other.
 _MIXXX_SYNC_LOCK = threading.Lock()
 
-def build_transition_comment(transitions):
-    """Formats one song's outgoing transitions as Mixxx comment text."""
+def _mashup_input_name(t):
+    """Resolved input-ingredient name for a mashup row: 'Artist - Title' when
+    the input is a library song (mi_title/mi_artist joined by the query), the
+    typed text otherwise."""
+    if t.get('mashup_input_song_id'):
+        n = ' - '.join(x for x in (t.get('mi_title'), t.get('mi_artist')) if x)
+        return n or '?'
+    return t.get('mashup_input_text') or '?'
+
+def build_library_comment(transitions, tags=None):
+    """One song's [DJ Library] comment section: a Tags line followed by its
+    outgoing transitions. Tags live here rather than in the genre field, so
+    Mixxx shows them in its comment column while the Genre column keeps a real
+    genre. Mashup rows render as "→ ⇄ Mashup (in: X) → Target"."""
     lines = [TRANSITION_COMMENT_OPEN]
+    if tags:
+        lines.append(f"{TAG_COMMENT_PREFIX} {', '.join(tags)}")
     for t in transitions:
         if t.get('to_song_id'):
             name = ' - '.join(x for x in (t.get('to_title'), t.get('to_artist')) if x) \
                    or t.get('to_filename') or '?'
         else:
             name = t.get('to_text') or 'Untitled track'
+        if t.get('is_mashup_track'):
+            name = f"⇄ Mashup (in: {_mashup_input_name(t)}) → {name}"
         suffix = ''
         if t.get('tag') and t.get('notes'):
             suffix = f" ({t['tag']}): {t['notes']}"
@@ -1073,7 +1758,7 @@ def sync_transitions_to_mixxx():
     if not _mixxx_db_accessible(db_path):
         return {'ok': False, 'error': _mixxx_error_hint(OSError('unable to open database file'))}
 
-    backup_path = db_path + '.backup-' + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    backup_path = db_path + '.backup-' + datetime.now().strftime("%Y%m%d-%H%M%S")
     conn = None
     try:
         shutil.copy2(db_path, backup_path)
@@ -1093,33 +1778,45 @@ def sync_transitions_to_mixxx():
         # strips any stale section from its Mixxx comment.
         with get_db() as db:
             rows = db.execute('''SELECT t.from_song_id, t.to_song_id, t.to_text, t.notes, t.tag,
+                    t.is_mashup_track, t.mashup_input_song_id, t.mashup_input_text,
                     s.filepath,
-                    ts.title AS to_title, ts.artist AS to_artist, ts.filename AS to_filename
+                    ts.title AS to_title, ts.artist AS to_artist, ts.filename AS to_filename,
+                    tis.title AS mi_title, tis.artist AS mi_artist
                 FROM transitions t
                 JOIN songs s ON s.id = t.from_song_id
                 LEFT JOIN songs ts ON ts.id = t.to_song_id
+                LEFT JOIN songs tis ON tis.id = t.mashup_input_song_id
                 WHERE t.status = 'confirmed'
                 ORDER BY t.from_song_id, t.id''').fetchall()
+            tagged = db.execute('''SELECT DISTINCT s.id, s.filepath FROM song_tags st
+                JOIN songs s ON s.id = st.song_id''').fetchall()
         by_song = {}
         for r in rows:
             by_song.setdefault(r['from_song_id'], []).append(dict(r))
+        # A song with tags but no transitions still needs its comment section:
+        # that is where its tags live.
+        tagged_paths = {r['id']: r['filepath'] for r in tagged}
+        tags_by_song = tags_for_songs(list(tagged_paths))
 
         synced, not_found = 0, []
         touched = set()
-        for song_id, ts in by_song.items():
+        for song_id in list(by_song) + [i for i in tagged_paths if i not in by_song]:
+            ts = by_song.get(song_id, [])
+            filepath = ts[0]['filepath'] if ts else tagged_paths[song_id]
             mrow = cur.execute(
                 "SELECT library.id FROM library "
                 "JOIN track_locations ON library.location = track_locations.id "
                 "WHERE track_locations.location = ?",
-                (ts[0]['filepath'],)).fetchone()
+                (filepath,)).fetchone()
             if not mrow:
-                not_found.append(ts[0]['filepath'])
+                not_found.append(filepath)
                 continue
             mid = mrow['id']
             touched.add(mid)
             old = cur.execute('SELECT comment FROM library WHERE id=?', (mid,)).fetchone()
             new_comment = merge_transition_comment(
-                old['comment'] if old else None, build_transition_comment(ts))
+                old['comment'] if old else None,
+                build_library_comment(ts, tags_by_song.get(song_id)))
             cur.execute('UPDATE library SET comment=? WHERE id=?', (new_comment, mid))
             synced += 1
 
@@ -1157,36 +1854,6 @@ def sync_transitions_to_mixxx():
 # write: refuse while Mixxx is open, back up the DB before writing, restore it
 # on any failure.
 
-def sync_play_counts_from_mixxx():
-    """Imports Mixxx's cumulative play counts without modifying its database.
-    Mixxx stores the count on library.played; some versions use date_played as
-    well, but played is the stable cumulative field."""
-    db_path = find_mixxx_db()
-    if not db_path:
-        return {'ok': False, 'error': "Could not find Mixxx's database. Open Mixxx at least once first."}
-    try:
-        conn = sqlite3.connect(db_path, timeout=2)
-        conn.row_factory = sqlite3.Row
-        cols = {r[1] for r in conn.execute('PRAGMA table_info(library)').fetchall()}
-        if 'played' not in cols:
-            conn.close()
-            return {'ok': False, 'error': "This Mixxx database does not expose play counts."}
-        rows = conn.execute("""SELECT tl.location, COALESCE(l.played, 0) AS played
-            FROM library l JOIN track_locations tl ON l.location=tl.id
-            WHERE tl.location IS NOT NULL""").fetchall()
-        conn.close()
-        updated = 0
-        with get_db() as db:
-            for row in rows:
-                cur = db.execute('UPDATE songs SET play_count=? WHERE filepath=? AND play_count<>?',
-                                 (int(row['played'] or 0), row['location'], int(row['played'] or 0)))
-                updated += cur.rowcount
-            db.commit()
-        return {'ok': True, 'updated': updated, 'tracks_read': len(rows)}
-    except Exception as e:
-        return {'ok': False, 'error': _mixxx_error_hint(e) + str(e)}
-
-
 def sync_new_songs_to_mixxx(filepaths):
     """Inserts DJ Library songs that Mixxx doesn't know yet into Mixxx's
     library, matched by filepath. Takes a list so the startup scan can batch
@@ -1208,7 +1875,7 @@ def sync_new_songs_to_mixxx(filepaths):
     if not songs:
         return {'ok': True, 'synced': 0, 'already_in_mixxx': 0}
 
-    backup_path = db_path + '.backup-' + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    backup_path = db_path + '.backup-' + datetime.now().strftime("%Y%m%d-%H%M%S")
     conn = None
     try:
         shutil.copy2(db_path, backup_path)
@@ -1241,7 +1908,7 @@ def sync_new_songs_to_mixxx(filepaths):
                 'genre': song['genre'], 'location': loc_id,
                 'duration': song['duration_seconds'],
                 'filetype': Path(fp).suffix.lower().lstrip('.'),
-                'datetime_added': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'datetime_added': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                 'mixxx_deleted': 0, 'header_parsed': 1,
             }
             fields = {k: v for k, v in fields.items() if k in cols}
@@ -1295,21 +1962,24 @@ def outgoing_transitions_for(song_id):
     file ID3 tags and the rekordbox export until they are confirmed."""
     with get_db() as db:
         rows = db.execute('''SELECT t.id, t.to_song_id, t.to_text, t.notes, t.tag,
-                ts.title AS to_title, ts.artist AS to_artist, ts.filename AS to_filename
+                t.is_mashup_track, t.mashup_input_song_id, t.mashup_input_text,
+                ts.title AS to_title, ts.artist AS to_artist, ts.filename AS to_filename,
+                tis.title AS mi_title, tis.artist AS mi_artist
             FROM transitions t
             LEFT JOIN songs ts ON ts.id = t.to_song_id
+            LEFT JOIN songs tis ON tis.id = t.mashup_input_song_id
             WHERE t.from_song_id = ? AND t.status = 'confirmed'
             ORDER BY t.created_at, t.id''', (song_id,)).fetchall()
     return [dict(r) for r in rows]
 
 
-def write_transition_comment_tag(filepath, transitions):
+def write_library_comment(filepath, transitions, tags=None):
     """Ensures the file's ID3 comment contains exactly the [DJ Library] section
-    built from `transitions` -- an empty list removes the section. The section
-    lives in a dedicated COMM frame (desc='DJ Library') so it never touches the
-    user's ordinary comment. Returns True if the file was rewritten, False if
-    it was already up to date (or the write failed)."""
-    section = build_transition_comment(transitions) if transitions else None
+    built from `transitions` and `tags` -- neither leaves the section removed.
+    The section lives in a dedicated COMM frame (desc='DJ Library') so it never
+    touches the user's ordinary comment. Returns True if the file was rewritten,
+    False if it was already up to date (or the write failed)."""
+    section = build_library_comment(transitions, tags) if (transitions or tags) else None
     try:
         try: tags = ID3(filepath)
         except ID3NoHeaderError: tags = ID3()
@@ -1334,31 +2004,43 @@ def write_transition_comment_tag(filepath, transitions):
         return False
 
 
-def sync_song_transition_tags(song_id):
-    """Rebuilds one song's ID3 transition comment from the DB (removes it when
-    the song has no transitions left)."""
+def sync_song_comment(song_id):
+    """Rebuilds one song's file comment section from the DB -- its outgoing
+    transitions and its tags -- removing the section when it has neither."""
     with get_db() as db:
         row = db.execute('SELECT filepath FROM songs WHERE id=?', (song_id,)).fetchone()
     if not row:
-        return
-    write_transition_comment_tag(row['filepath'], outgoing_transitions_for(song_id))
+        return False
+    return write_library_comment(row['filepath'], outgoing_transitions_for(song_id),
+                                 get_song_tags(song_id))
+
+
+def sync_song_transition_tags(song_id):
+    """Called from every transition change. The same comment section also
+    carries the song's tags, so one writer keeps both in step."""
+    return sync_song_comment(song_id)
 
 
 def backfill_transition_tags():
-    """Startup pass: makes sure every song's file tag matches the DB (writes
-    missing sections, removes stale ones). Idempotent -- files that already
-    match are left untouched. Runs in the background so startup stays fast."""
+    """Startup pass: makes sure every song's file comment matches the DB
+    (writes missing sections, removes stale ones). Covers tagged songs as well
+    as transition sources, since both live in that section. Idempotent -- files
+    that already match are left untouched. Runs in the background."""
     try:
         with get_db() as db:
             rows = db.execute('''SELECT DISTINCT s.id, s.filepath FROM transitions t
-                JOIN songs s ON s.id = t.from_song_id''').fetchall()
+                JOIN songs s ON s.id = t.from_song_id
+                UNION
+                SELECT DISTINCT s.id, s.filepath FROM song_tags st
+                JOIN songs s ON s.id = st.song_id''').fetchall()
         written = 0
         for r in rows:
-            if write_transition_comment_tag(r['filepath'], outgoing_transitions_for(r['id'])):
+            if write_library_comment(r['filepath'], outgoing_transitions_for(r['id']),
+                                     get_song_tags(r['id'])):
                 written += 1
-        print(f"Transition tag backfill: {written} file(s) updated")
+        print(f"Comment backfill: {written} file(s) updated")
     except Exception as e:
-        print(f"Transition tag backfill failed: {e}")
+        print(f"Comment backfill failed: {e}")
 
 
 def sync_transitions_after_change(song_id):
@@ -1422,8 +2104,6 @@ def update_config():
         updates['rekordbox_export_path'] = p
     if 'auto_sync_mixxx' in data:
         updates['auto_sync_mixxx'] = bool(data['auto_sync_mixxx'])
-    if 'auto_sync_mixxx_plays' in data:
-        updates['auto_sync_mixxx_plays'] = bool(data['auto_sync_mixxx_plays'])
     if 'key_display' in data:
         kd = str(data['key_display']).strip()
         if kd not in ('camelot', 'notation'):
@@ -1433,6 +2113,14 @@ def update_config():
         updates['auto_install_python'] = bool(data['auto_install_python'])
     if 'auto_cleanup_metadata' in data:
         updates['auto_cleanup_metadata'] = bool(data['auto_cleanup_metadata'])
+    if 'auto_spotify_genre' in data:
+        updates['auto_spotify_genre'] = bool(data['auto_spotify_genre'])
+    if 'auto_genre_backfill' in data:
+        updates['auto_genre_backfill'] = bool(data['auto_genre_backfill'])
+    if 'library_name' in data:
+        # Display name for the header/tab; empty string falls back to the
+        # default "DJ / LIB" branding. Clamped so the header can't overflow.
+        updates['library_name'] = str(data['library_name']).strip()[:60]
     if not updates:
         return jsonify({'error': 'no valid fields'}), 400
     _save_config(updates)
@@ -1443,7 +2131,6 @@ def update_config():
 
 @app.route('/api/songs')
 def get_songs():
-    maybe_sync_mixxx_play_counts()
     q = request.args.get('q','')
     with get_db() as db:
         if q:
@@ -1452,47 +2139,7 @@ def get_songs():
                 ORDER BY artist,title''', (f'%{q}%',)*4).fetchall()
         else:
             rows = db.execute('SELECT * FROM songs ORDER BY artist,title').fetchall()
-    return jsonify([dict(r) for r in rows])
-
-@app.route('/api/sync/mixxx-play-counts', methods=['POST'])
-def sync_mixxx_play_counts():
-    return jsonify(sync_play_counts_from_mixxx())
-
-_PLAY_SYNC_LOCK = threading.Lock()
-_last_play_sync = 0
-
-def maybe_sync_mixxx_play_counts():
-    """Activity-triggered, throttled read-only Mixxx sync. It never touches the
-    Mixxx database while Mixxx is running and runs at most once per interval."""
-    global _last_play_sync
-    if not AUTO_SYNC_MIXXX_PLAYS or is_mixxx_running():
-        return
-    import time
-    if time.time() - _last_play_sync < 60:
-        return
-    if not _PLAY_SYNC_LOCK.acquire(blocking=False):
-        return
-    _last_play_sync = time.time()
-    def work():
-        try:
-            result = sync_play_counts_from_mixxx()
-            if result.get('ok') and result.get('updated'):
-                print(f"Auto Mixxx play sync: {result['updated']} track(s) updated", flush=True)
-        finally:
-            _PLAY_SYNC_LOCK.release()
-    threading.Thread(target=work, daemon=True).start()
-
-@app.route('/api/songs/<int:song_id>/played', methods=['POST'])
-def mark_song_played(song_id):
-    """Records one play for a song; smart crates can use this for rankings."""
-    with get_db() as db:
-        row = db.execute('SELECT id FROM songs WHERE id=?', (song_id,)).fetchone()
-        if not row:
-            return jsonify({'error': 'not found'}), 404
-        db.execute('UPDATE songs SET play_count=COALESCE(play_count, 0)+1 WHERE id=?', (song_id,))
-        db.commit()
-        count = db.execute('SELECT play_count FROM songs WHERE id=?', (song_id,)).fetchone()['play_count']
-    return jsonify({'ok': True, 'play_count': count})
+    return jsonify(_with_tags([dict(r) for r in rows]))
 
 # Browsers can't play every extension DJ software uses; map the ones that work
 # in an <audio> element and fall back to Python's guess for the rest.
@@ -1575,9 +2222,166 @@ def _spotify_search_track(title, artist, duration_s=None):
         'duration_delta': round(dur_delta, 1) if duration_s else None,
     }
 
+# -- GENRE SOURCES ---------------------------------------------------------------
+# Spotify's genres are artist-level, broad ("edm", "dance pop") and frequently
+# empty for underground or remix releases, so they are the LAST resort here.
+# The two databases that know a track are BOTH queried -- Discogs release
+# *styles* (the vocabulary DJs actually filter on, attached per release) and
+# MusicBrainz artist genres (free, no key) -- and their answers are scored
+# together (see _combine_genres). Agreeing sources share the credit; when they
+# disagree the proposal DJs are most likely to filter on wins, rather than
+# whichever source happened to answer first. Spotify's broad artist genres are
+# the last resort. A source that errors is skipped, so one flaky API never
+# blocks the fill.
+#
+# Discogs needs no key either -- unauthenticated lookups are limited to 25
+# requests/minute, and the optional free personal access token (config
+# "discogs_token", read into DISCOGS_TOKEN above) raises that to 60.
+MB_USER_AGENT = 'dj-library/1.0 (self-hosted DJ library; +https://musicbrainz.org)'
+# Discogs allows 25 requests/minute without a token and 60 with one. The bulk
+# "fill missing genres" action deliberately paces its lookups under that limit:
+# a 429 halfway through would silently fall back to a weaker source, giving the
+# same track a different genre depending on when it was scanned. Add a free
+# "discogs_token" to config.json to roughly halve a whole-library fill.
+DISCOGS_MIN_INTERVAL = 60.0 / (60.0 if DISCOGS_TOKEN else 25.0)
+_discogs_lock = threading.Lock()
+_discogs_last_call = [0.0]
+
+# Words that name a genre DJ software users filter on. Matched on whole words,
+# so 'electro' does not match the umbrella term 'Electronic'.
+_DJ_GENRE_WORDS = ('house', 'techno', 'trance', 'disco', 'drum and bass', 'dnb',
+                   'dubstep', 'funk', 'downtempo', 'breakbeat', 'jungle',
+                   'garage', 'hardstyle', 'psytrance', 'amapiano', 'afro',
+                   'electro', 'rave', 'minimal', 'acid', 'bass')
+# Catch-alls that are only worth proposing when nothing more specific came back,
+# so ['edm', 'house'] reads as 'House' but ['edm'] alone still gives 'Edm'.
+_CATCH_ALL_GENRES = ('edm',)
+# Umbrella terms sources return for everything (Discogs labels every electronic
+# release 'Electronic'). A result made only of these is not worth proposing, so
+# it is skipped and the next source gets a turn.
+_GENERIC_GENRES = {'electronic', 'electronica', 'dance', 'pop', 'music', 'rock',
+                   'alternative', 'various'}
+
+
+def _key_text(s):
+    """Case/punctuation-insensitive text for matching titles and artists
+    across sources. Unlike _norm_text it keeps word boundaries (a hyphen
+    becomes a space), so 'girl$ - Remix' still lines up with 'girl$ (Remix)'."""
+    spaced = re.sub(r'[^a-z0-9]+', ' ', (s or '').lower())
+    return spaced.strip()
+
+
+def _title_keys(title):
+    """Candidate normalised forms of a track title for cross-source matching:
+    the whole title, then the part before any '(...)' or ' - ' descriptor.
+    Sources often list the base title only ('Levels' for 'Levels - Radio
+    Edit'), so the shorter forms are tried only after the full title fails."""
+    base = re.split(r'\s*[\(\[]', (title or ''))[0]
+    keys = (_key_text(title), _key_text(base), _key_text(base.split(' - ')[0]))
+    return [k for k in dict.fromkeys(keys) if k]
+
+
+# Trailing words YouTube channels leave on artist tags ('... - Topic'), which
+# must be stripped before the name can be matched against a music database.
+_ARTIST_NOISE = ('topic', 'official', 'vevo', 'music', 'records', 'tv', 'hq',
+                 'audio', 'channel', 'network')
+
+
+def _artist_keys(artist):
+    """Candidate act names from a tag like 'Anyma, Chris Avantgarde' or
+    'Monolink feat. Zola', for verifying that a web match credits the act we
+    searched for -- so a same-titled track by another artist can't supply the
+    genre. Parentheticals and YouTube channel suffixes are discarded."""
+    text = re.sub(r'\([^)]*\)', ' ', artist or '')
+    keys = []
+    for part in re.split(r'[,/&]|\bfeat\.?\b|\bft\.?\b|\bwith\b|\sx\s',
+                         text, flags=re.IGNORECASE):
+        key = _key_text(part)
+        if len(key) <= 2:
+            continue
+        keys.append(key)
+        words = key.split()
+        while words and words[-1] in _ARTIST_NOISE:
+            words.pop()
+        if len(words) > 1:
+            keys.append(' '.join(words))
+    return list(dict.fromkeys(keys))
+
+
+def _pick_dj_genre(genres):
+    """The most DJ-recognisable genre from a source's list, e.g. 'Tech House'
+    out of ['Electronic', 'Tech House']. Falls back to the first entry when
+    nothing reads like a genre DJ software users filter on."""
+    cleaned = []
+    for g in genres or []:
+        c = clean_genre(str(g).title()) if g else None
+        if c and c not in cleaned:
+            cleaned.append(c)
+    if not cleaned:
+        return None
+    preferred = [g for g in cleaned
+                 if any(re.search(rf'\b{re.escape(w)}\b', g.lower())
+                        for w in _DJ_GENRE_WORDS)]
+    if preferred:
+        return preferred[0]
+    catch_all = [g for g in cleaned
+                 if any(re.search(rf'\b{re.escape(w)}\b', g.lower())
+                        for w in _CATCH_ALL_GENRES)]
+    if catch_all:
+        return catch_all[0]
+    informative = [g for g in cleaned if g.lower() not in _GENERIC_GENRES]
+    return informative[0] if informative else None
+
+
+def _genre_key(genre):
+    """Text-insensitive form of a genre, so Discogs' 'Drum & Bass' and
+    MusicBrainz' 'drum and bass' are recognised as the same answer."""
+    key = re.sub(r'&', ' and ', (genre or '').lower())
+    return re.sub(r'[^a-z0-9]+', ' ', key).strip()
+
+
+def _genre_rank(genre):
+    """Rough 'how likely is this a genre DJs filter on' score for a proposal.
+
+    A whole-word hit on the DJ vocabulary (house, techno, trance, ...) is the
+    strongest signal; a catch-all like 'Edm' counts against it. Specificity
+    (word count) then separates names that both read as DJ genres, so
+    'Progressive House' edges out the bare umbrella 'House'."""
+    if not genre:
+        return -1
+    key = _genre_key(genre)
+    rank = len(key.split())
+    if any(re.search(rf'\b{re.escape(w)}\b', key) for w in _DJ_GENRE_WORDS):
+        rank += 10
+    if any(re.search(rf'\b{re.escape(w)}\b', key) for w in _CATCH_ALL_GENRES):
+        rank -= 5
+    return rank
+
+
+def _combine_genres(*proposals):
+    """The most likely DJ genre from per-source proposals.
+
+    Each proposal is (source_name, genre); empty genres are dropped. Sources
+    that agree are the strongest signal, so they share the credit
+    ('Discogs + MusicBrainz'). On a disagreement the genre itself is scored --
+    not the source order -- and the most DJ-recognisable / most specific name
+    wins; a genuine tie keeps the earlier (more precise) source. Returns
+    (genre, source_name) or (None, None)."""
+    seen = [(name, g) for name, g in proposals if g]
+    if not seen:
+        return None, None
+    if len(seen) == 1:
+        return seen[0][1], seen[0][0]
+    if len({_genre_key(g) for _, g in seen}) == 1:
+        return seen[0][1], ' + '.join(name for name, _ in seen)
+    # max() keeps the first element on a tie, i.e. the earlier/precise source.
+    source, genre = max(seen, key=lambda p: _genre_rank(p[1]))
+    return genre, source
+
+
 def _spotify_artist_genre(artist_id):
     """A DJ-usable genre string from the artist's Spotify profile, e.g.
-    'Melodic Techno'. Prefers genre words DJ software users recognise."""
+    'Melodic Techno'. Last-resort source -- see resolve_genre."""
     token = get_spotify_token()
     if not token or not artist_id:
         return None
@@ -1585,18 +2389,165 @@ def _spotify_artist_genre(artist_id):
         headers={'Authorization': f'Bearer {token}'})
     if resp.status_code != 200:
         return None
-    genres = resp.json().get('genres', [])
-    if not genres:
+    return _pick_dj_genre(resp.json().get('genres'))
+
+
+def _discogs_request(params):
+    """Paced GET against the Discogs search API (see DISCOGS_MIN_INTERVAL)."""
+    headers = {'User-Agent': MB_USER_AGENT}
+    if DISCOGS_TOKEN:
+        headers['Authorization'] = f'Discogs token={DISCOGS_TOKEN}'
+    with _discogs_lock:
+        wait = DISCOGS_MIN_INTERVAL - (time.time() - _discogs_last_call[0])
+        if wait > 0:
+            time.sleep(wait)
+        try:
+            return requests.get('https://api.discogs.com/database/search',
+                                params=params, headers=headers, timeout=10)
+        finally:
+            _discogs_last_call[0] = time.time()
+
+
+def _discogs_genre(title, artist):
+    """Genre from the Discogs release styles of the best-matching release.
+
+    Discogs lists a release's styles in relevance order and only releases whose
+    title contains this track's title are considered, so a search that drifts
+    to another song contributes nothing. One request; no key required."""
+    if not title:
         return None
-    preferred = [g for g in genres if any(
-        w in g for w in ('house','techno','trance','disco','drum and bass','dnb',
-                         'dubstep','funk','edm','downtempo','breakbeat','jungle'))]
-    pick = preferred[0] if preferred else genres[0]
-    return clean_genre(pick.title())
+    try:
+        resp = _discogs_request({'q': f'{artist} {title}'.strip(),
+                                 'type': 'release', 'per_page': 10})
+    except requests.RequestException as e:
+        _log(f"Discogs genre lookup failed for {title!r}: {e}")
+        return None
+    if resp.status_code != 200:
+        _log(f"Discogs genre lookup HTTP {resp.status_code} for {title!r}")
+        return None
+    try:
+        results = resp.json().get('results') or []
+    except ValueError:
+        return None
+    # Discogs search titles read 'Artist - Title'. Prefer a release that names
+    # BOTH the track and the act; only if none exists fall back to a title-only
+    # match, and always try the fullest title first so 'Levels - Radio Edit'
+    # prefers an actual 'Levels' release over whatever a looser match hits.
+    artists = _artist_keys(artist)
+    for require_artist in (True, False):
+        for key in _title_keys(title):
+            for r in results:
+                discogs_title = _key_text(r.get('title'))
+                if key not in discogs_title:
+                    continue
+                if require_artist and artists and not any(a in discogs_title for a in artists):
+                    continue
+                genre = _pick_dj_genre(r.get('style'))
+                if genre:
+                    return genre
+    return None
+
+
+# MusicBrainz asks all clients to identify themselves and to stay under one
+# request per second; both are enforced here. Repeated probes showed it also
+# drops connections temporarily when that is exceeded, so this is deliberately
+# the fallback rather than the primary source.
+_mb_lock = threading.Lock()
+_mb_last_call = [0.0]
+
+
+def _musicbrainz_get(path, params):
+    """GET a MusicBrainz JSON endpoint, throttled to 1 req/sec with one retry
+    for the transient connection drops it occasionally returns."""
+    with _mb_lock:
+        for attempt in range(2):
+            wait = 1.05 - (time.time() - _mb_last_call[0])
+            if wait > 0:
+                time.sleep(wait)
+            try:
+                resp = requests.get('https://musicbrainz.org/ws/2/' + path,
+                    params={**params, 'fmt': 'json'},
+                    headers={'User-Agent': MB_USER_AGENT}, timeout=10)
+                _mb_last_call[0] = time.time()
+                if resp.status_code == 200:
+                    return resp.json()
+                if resp.status_code != 429:
+                    _log(f"MusicBrainz {path} HTTP {resp.status_code}")
+                    return None
+            except (requests.RequestException, ValueError) as e:
+                _mb_last_call[0] = time.time()
+                _log(f"MusicBrainz {path} failed: {e}")
+                if attempt:
+                    return None
+            time.sleep(1.5)
+    return None
+
+
+def _musicbrainz_genre(title, artist):
+    """Genre from the artist behind the matching MusicBrainz recording. The
+    match is verified on BOTH the track title and the credited act, so a
+    same-named unrelated band can never supply the genre."""
+    if not title:
+        return None
+    data = _musicbrainz_get('recording',
+        {'query': f'{title} {artist}'.strip(), 'limit': 5})
+    title_keys = _title_keys(title)
+    artists = _artist_keys(artist)
+    artist_id = None
+    for rec in (data or {}).get('recordings') or []:
+        rec_title = _key_text(rec.get('title'))
+        if title_keys and not any(k in rec_title for k in title_keys):
+            continue
+        credit = rec.get('artist-credit') or []
+        name = _key_text(credit[0]['artist']['name']) if credit else ''
+        if artists and not any(a in name or name in a for a in artists):
+            continue
+        artist_id = credit[0]['artist']['id'] if credit else None
+        break
+    if not artist_id:
+        return None
+    data = _musicbrainz_get(f'artist/{artist_id}', {'inc': 'genres'})
+    return _pick_dj_genre([g.get('name') for g in (data or {}).get('genres') or []])
+
+
+def resolve_genre(title, artist, artist_id=None):
+    """Genre proposal for one track, scored across the known sources.
+
+    Discogs release styles and MusicBrainz genres are BOTH looked up, then
+    combined (see _combine_genres): a genre both sources agree on wins, and on
+    a disagreement the most DJ-recognisable / most specific name wins rather
+    than whichever source answered first. Spotify's broad artist genres are
+    only consulted when neither database has anything. Returns (genre,
+    source_name) or (None, None)."""
+    sources = (('Discogs', lambda: _discogs_genre(title, artist)),
+               ('MusicBrainz', lambda: _musicbrainz_genre(title, artist)))
+    proposals = []
+    for name, lookup in sources:
+        try:
+            genre = lookup()
+        except Exception as e:
+            _log(f"Genre source {name} failed for {title!r}: {e}")
+            continue
+        if genre:
+            proposals.append((name, genre))
+    if not proposals:      # last resort: Spotify's artist-level genres
+        try:
+            genre = _spotify_artist_genre(artist_id)
+        except Exception as e:
+            _log(f"Genre source Spotify failed for {title!r}: {e}")
+        else:
+            if genre:
+                proposals.append(('Spotify', genre))
+    return _combine_genres(*proposals)
 
 @app.route('/api/cleanup/match/<int:song_id>')
 def cleanup_match(song_id):
-    """Proposes proper tags for one track from Spotify. Read-only."""
+    """Proposes proper tags for one track from Spotify, with a genre from the
+    most precise available source (see resolve_genre). Read-only.
+    Reuses the last stored proposal when it is still valid (track undecided,
+    identifying tags unchanged) so reopening the cleanup panel doesn't
+    re-query Spotify for matches it already made. Pass ?refresh=1 to force a
+    fresh API lookup."""
     with get_db() as db:
         s = db.execute('SELECT * FROM songs WHERE id=?', (song_id,)).fetchone()
     if not s:
@@ -1610,33 +2561,95 @@ def cleanup_match(song_id):
             artist, title = [p.strip() for p in name.split(' - ', 1)]
         else:
             title = name
+    # Cache hit: an undecided track whose title/artist haven't changed since
+    # the match was made reuses the stored proposal.
+    if request.args.get('refresh') != '1' and not s['cleanup_scanned_at']:
+        cached = None
+        try:
+            cached = json.loads(s['cleanup_proposal_json']) if s['cleanup_proposal_json'] else None
+        except (ValueError, TypeError):
+            cached = None
+        if cached and cached.get('_src_title') == title \
+                and cached.get('_src_artist') == artist:
+            cached.pop('_src_title', None)
+            cached.pop('_src_artist', None)
+            return jsonify({'found': True, 'song_id': song_id, **cached})
     m = _spotify_search_track(title, artist, s['duration_seconds'])
     if not m:
         return jsonify({'found': False, 'song_id': song_id})
-    m['genre'] = _spotify_artist_genre(m.pop('artist_id', None))
+    # Genre comes from the most precise source available (Discogs / MusicBrainz
+    # first, Spotify last) rather than the Spotify artist alone.
+    m['genre'], m['genre_source'] = resolve_genre(
+        m.get('title') or title, m.get('artist') or artist, m.pop('artist_id', None))
     m['song_id'] = song_id
+    # Persist for reuse (the _src fields let the cache detect stale matches).
+    with get_db() as db:
+        db.execute('UPDATE songs SET cleanup_proposal_json=? WHERE id=?',
+                   (json.dumps({**m, '_src_title': title, '_src_artist': artist}), song_id))
+        db.commit()
     return jsonify({'found': True, **m})
 
-def _write_cleanup_fix(song_id, updates, spotify_id=None):
+CLEANUP_FIELDS = ('title', 'artist', 'album', 'year', 'genre')
+
+def _with_db(fn):
+    """Runs fn(db) with a fresh connection when none was supplied."""
+    if fn is None:
+        return None
+    db = get_db()
+    try:
+        return fn(db)
+    finally:
+        db.close()
+
+def _record_cleanup_decision(song_id, decision, db=None):
+    """Marks one track as decided ('applied' / 'rejected' / 'no_match' /
+    'skipped'). Pass db=None to use a fresh connection."""
+    def run(conn):
+        row = conn.execute('SELECT 1 FROM songs WHERE id=?', (song_id,)).fetchone()
+        if not row:
+            return False
+        conn.execute('''UPDATE songs SET cleanup_scanned_at=CURRENT_TIMESTAMP,
+            cleanup_decision=? WHERE id=?''', (decision, song_id))
+        conn.commit()
+        return True
+    return run(db) if db is not None else _with_db(run)
+
+def _write_cleanup_fix(song_id, updates, spotify_id=None, db=None):
     """Writes one track's cleaned-up tags to its ID3 file and DB row, and
     records the decision as 'applied' so future "only never-scanned" cleanups
     skip this track and manual tag edits are never silently overwritten.
     Shared by the review apply endpoint and the automatic cleanup on download.
     Returns True if the song existed and was updated."""
-    with get_db() as db:
-        row = db.execute('SELECT filepath FROM songs WHERE id=?', (song_id,)).fetchone()
+    # A '#tag' in a proposed genre is a tag, not a genre.
+    extra_tags = []
+    if updates and 'genre' in updates:
+        genre, extra_tags = split_genre_tags(updates['genre'])
+        updates = {**updates, 'genre': genre}
+    def run(conn):
+        row = conn.execute('SELECT filepath FROM songs WHERE id=?', (song_id,)).fetchone()
         if not row:
             return False
         filepath = row['filepath']
         if updates:
             sets = ','.join(f'{k}=?' for k in updates)
-            db.execute(f'UPDATE songs SET {sets} WHERE id=?', (*updates.values(), song_id))
+            conn.execute(f'UPDATE songs SET {sets} WHERE id=?', (*updates.values(), song_id))
         if spotify_id:
-            db.execute('UPDATE songs SET spotify_id=? WHERE id=?', (spotify_id, song_id))
-        db.execute('''UPDATE songs SET cleanup_scanned_at=CURRENT_TIMESTAMP,
+            conn.execute('UPDATE songs SET spotify_id=? WHERE id=?', (spotify_id, song_id))
+        conn.execute('''UPDATE songs SET cleanup_scanned_at=CURRENT_TIMESTAMP,
             cleanup_decision='applied' WHERE id=?''', (song_id,))
-        db.commit()
-    write_metadata(filepath, **updates)
+        conn.commit()
+        return filepath
+    filepath = run(db) if db is not None else _with_db(run)
+    if not filepath:
+        return False
+    if updates:
+        write_metadata(filepath, **updates)
+    if updates and 'genre' in updates:
+        write_file_genre(filepath, updates['genre'])
+    if extra_tags:
+        # Recognised as tags rather than dropped, so nothing typed is lost.
+        add_song_tags(song_id, extra_tags)
+        sync_song_comment(song_id)
     queue_auto_export()
     return True
 
@@ -1644,20 +2657,64 @@ def _write_cleanup_fix(song_id, updates, spotify_id=None):
 def cleanup_apply(song_id):
     """Writes reviewed tags to one track's ID3 file tags and DB row."""
     data = request.json or {}
-    updates = {k: data[k] for k in ('title','artist','album','year','genre')
-               if data.get(k)}
+    updates = {k: data[k] for k in CLEANUP_FIELDS if data.get(k)}
     if not _write_cleanup_fix(song_id, updates, data.get('spotify_id')):
         return jsonify({'error': 'not found'}), 404
     return jsonify({'ok': True, 'applied': list(updates)})
 
+@app.route('/api/cleanup/apply-genre/<int:song_id>', methods=['POST'])
+def cleanup_apply_genre(song_id):
+    """Fills one track's missing genre from a reviewed Spotify proposal.
+
+    Deliberately narrower than /api/cleanup/apply: it writes ONLY the genre,
+    only when the track has none (an existing or user-entered genre is never
+    replaced), and it records NO cleanup decision -- the track keeps its
+    "never scanned" status, so a later full metadata cleanup of its
+    title/artist still sees it. Nothing else about the file is touched."""
+    data = request.json or {}
+    # The genre field is genres only; a '#tag' typed into it is kept as a tag.
+    genre, extra_tags = split_genre_tags((data.get('genre') or '').strip())
+    if not genre:
+        return jsonify({'error': 'A genre is required'}), 400
+    with get_db() as db:
+        row = db.execute('SELECT filepath FROM songs WHERE id=?', (song_id,)).fetchone()
+    if not row:
+        return jsonify({'error': 'not found'}), 404
+    applied = _write_spotify_genre_if_missing(song_id, row['filepath'], genre)
+    if extra_tags:
+        add_song_tags(song_id, extra_tags)
+        sync_song_comment(song_id)
+    return jsonify({'ok': True, 'applied': applied, 'genre': genre,
+                    'tags_extracted': extra_tags})
+
+@app.route('/api/cleanup/decide/<int:song_id>', methods=['POST'])
+def cleanup_decide(song_id):
+    """Records the user's decision on one proposed fix: 'rejected' (accept my
+    current tags) or 'applied' with a (possibly user-edited) field set --
+    letting the user tweak the metadata before it is written. The song is
+    marked decided either way so it never comes back in later scans."""
+    data = request.json or {}
+    decision = data.get('decision')
+    if decision not in ('rejected', 'applied'):
+        return jsonify({'error': "decision must be 'applied' or 'rejected'"}), 400
+    if decision == 'rejected':
+        if not _record_cleanup_decision(song_id, 'rejected'):
+            return jsonify({'error': 'not found'}), 404
+        return jsonify({'ok': True, 'decision': 'rejected'})
+    updates = {k: data[k] for k in CLEANUP_FIELDS if data.get(k)}
+    if not _write_cleanup_fix(song_id, updates, data.get('spotify_id')):
+        return jsonify({'error': 'not found'}), 404
+    return jsonify({'ok': True, 'decision': 'applied', 'applied': list(updates)})
+
 @app.route('/api/cleanup/mark-scanned', methods=['POST'])
 def cleanup_mark_scanned():
-    """Records a cleanup decision for tracks that were scanned but not applied:
-    'no_match' (Spotify had nothing) or 'skipped' (the user saw the proposal in
-    the review panel and unchecked it — keep my tags). Lets later "only
-    never-scanned" cleanups skip decided tracks; undecided ones come back."""
+    """Records a batch cleanup decision for tracks that were scanned but not
+    applied: 'no_match' (Spotify had nothing), 'rejected' (the user pressed
+    Reject — keep my tags) or 'skipped' (saw the proposal, left it undecided).
+    Lets later "only never-scanned" cleanups skip decided tracks; undecided
+    ones come back."""
     data = request.json or {}
-    decision = data.get('decision') if data.get('decision') in ('no_match', 'skipped') else 'no_match'
+    decision = data.get('decision') if data.get('decision') in ('no_match', 'rejected', 'skipped') else 'no_match'
     ids = [i for i in data.get('ids', []) if isinstance(i, int)]
     if not ids:
         return jsonify({'ok': True, 'marked': 0})
@@ -1669,15 +2726,274 @@ def cleanup_mark_scanned():
         db.commit()
     return jsonify({'ok': True, 'marked': len(ids), 'decision': decision})
 
-def auto_cleanup_download(song_id):
-    """Background metadata cleanup for a freshly-downloaded track. Matches it
+def schedule_auto_cleanup(song_id, cleanup_download=False):
+    """Queue enabled Spotify metadata automation for a newly added track."""
+    if AUTO_SPOTIFY_GENRE or (cleanup_download and AUTO_CLEANUP_METADATA):
+        threading.Thread(target=auto_cleanup_download,
+                         args=[song_id, cleanup_download], daemon=True).start()
+
+
+def schedule_auto_cleanup_for_path(filepath):
+    """Resolve a newly-added filepath to its song row and queue enabled automation."""
+    if not AUTO_SPOTIFY_GENRE:
+        return
+    with get_db() as db:
+        row = db.execute('SELECT id FROM songs WHERE filepath=?', (filepath,)).fetchone()
+    if row:
+        schedule_auto_cleanup(row['id'])
+
+
+def _write_spotify_genre_if_missing(song_id, filepath, genre):
+    """Fill an empty genre only; a concurrent or user-written genre wins."""
+    genre = clean_genre(genre)
+    if not genre:
+        return False
+    with get_db() as db:
+        cursor = db.execute('''UPDATE songs SET genre=? WHERE id=?
+            AND (genre IS NULL OR TRIM(genre)='')''', (genre, song_id))
+        db.commit()
+        applied = cursor.rowcount == 1
+    if applied:
+        write_metadata(filepath, genre=genre)
+        queue_auto_export()
+    return applied
+
+
+# -- GENRE BACKFILL -----------------------------------------------------------
+# "Fill every missing genre" as a resumable background job. The review panel
+# proposes genres one track at a time; this is the unattended whole-library
+# version. It is deliberately:
+#   * paced -- every lookup goes through the same paced Discogs limiter as the
+#     review tool (DISCOGS_MIN_INTERVAL), so it can never trip the rate limit
+#     however large the library is;
+#   * resumable -- every attempted track is stamped with genre_backfill_at, so
+#     Cancel, quit, or a crash keeps the work done so far and the next run
+#     continues with the tracks still outstanding (no duplicate lookups);
+#   * conservative -- it writes a genre only where the track has none
+#     (_write_spotify_genre_if_missing) and never touches any other tag.
+#
+# One row of the genre_backfill table holds the job's progress, so the UI can
+# report it (and survive a restart) without any in-memory bookkeeping.
+_backfill_lock = threading.Lock()
+_backfill_cancel = threading.Event()
+_backfill_thread = [None]
+
+
+def _backfill_state():
+    """The persisted genre-backfill progress row, or None."""
+    with get_db() as db:
+        return db.execute('SELECT * FROM genre_backfill WHERE id=1').fetchone()
+
+
+def _backfill_update(**fields):
+    """Updates the progress row (stamping updated_at) and commits. A field
+    whose value is the literal 'CURRENT_TIMESTAMP' is written as SQL now(), so
+    started_at can be a column assignment rather than a Python timestamp."""
+    if not fields:
+        return
+    fields['updated_at'] = 'CURRENT_TIMESTAMP'
+    assignments, values = [], []
+    for key, value in fields.items():
+        if value == 'CURRENT_TIMESTAMP':
+            assignments.append(f'{key}=CURRENT_TIMESTAMP')
+        else:
+            assignments.append(f'{key}=?')
+            values.append(value)
+    with get_db() as db:
+        db.execute(f'UPDATE genre_backfill SET {", ".join(assignments)} WHERE id=1', values)
+        db.commit()
+
+
+def _backfill_remaining():
+    """Tracks still to look up: no genre and not yet attempted by a backfill."""
+    with get_db() as db:
+        return db.execute(
+            "SELECT COUNT(*) FROM songs WHERE (genre IS NULL OR TRIM(genre)='') "
+            "AND genre_backfill_at IS NULL").fetchone()[0]
+
+
+def _backfill_next_song():
+    """The next track to look up, oldest first, or None when there is none."""
+    with get_db() as db:
+        return db.execute(
+            "SELECT id, filepath, title, artist FROM songs "
+            "WHERE (genre IS NULL OR TRIM(genre)='') AND genre_backfill_at IS NULL "
+            "ORDER BY id LIMIT 1").fetchone()
+
+
+def _genre_backfill_worker():
+    """Walks the outstanding tracks, writing a genre wherever one is found.
+
+    Runs in a daemon thread. Cancellation is cooperative: the flag is checked
+    between tracks, so at most the lookup already in flight finishes after
+    Cancel. Every attempted track is stamped, so nothing is looked up twice.
+    """
+    state = _backfill_state()
+    attempted = (state['attempted'] if state else 0) or 0
+    filled = (state['filled'] if state else 0) or 0
+    try:
+        while not _backfill_cancel.is_set():
+            song = _backfill_next_song()
+            if not song:
+                break
+            title = song['title'] or clean_noise(Path(song['filepath']).stem)
+            genre = source = None
+            try:
+                genre, source = resolve_genre(title, song['artist'])
+            except Exception as e:      # one bad track must never kill the job
+                _log(f"Genre backfill lookup failed for song {song['id']}: {e}")
+            applied = False
+            if genre:
+                try:
+                    applied = _write_spotify_genre_if_missing(song['id'], song['filepath'], genre)
+                except Exception as e:
+                    _log(f"Genre backfill write failed for song {song['id']}: {e}")
+                if applied:
+                    _log(f"Genre backfill song {song['id']}: {genre!r} from {source}")
+            # Stamp the track whether or not a genre was found: it has been
+            # looked up. Without this a genreless track would be retried forever.
+            with get_db() as db:
+                db.execute('UPDATE songs SET genre_backfill_at=CURRENT_TIMESTAMP WHERE id=?',
+                           (song['id'],))
+                db.commit()
+            attempted += 1
+            if applied:
+                filled += 1
+            _backfill_update(status='running', attempted=attempted, filled=filled,
+                             current_id=song['id'], current_title=title)
+    except Exception as e:
+        _log(f"Genre backfill stopped unexpectedly: {e}")
+        _backfill_update(status='error', error=str(e), current_id=None, current_title=None)
+        _backfill_thread[0] = None
+        return
+    remaining = _backfill_remaining()
+    if _backfill_cancel.is_set() and remaining:
+        _backfill_update(status='cancelled', current_id=None, current_title=None)
+        _log(f"Genre backfill cancelled with {remaining} track(s) left to look up")
+    else:
+        _backfill_update(status='done', attempted=attempted, filled=filled,
+                         current_id=None, current_title=None)
+        _log(f"Genre backfill finished: filled {filled} of {attempted} looked up")
+    # Cleared last: a caller that sees no thread knows the final status is written.
+    _backfill_thread[0] = None
+
+
+def start_genre_backfill():
+    """Starts or resumes the whole-library genre backfill; returns its status.
+
+    A finished or fresh job starts from scratch; a cancelled or interrupted one
+    continues with the tracks it has not attempted yet. Ignored (a no-op) when
+    a worker is already running, so double-pressing the button is harmless.
+    """
+    with _backfill_lock:
+        if _backfill_thread[0] and _backfill_thread[0].is_alive():
+            return 'running'
+        state = _backfill_state()
+        status = (state['status'] if state else 'idle') or 'idle'
+        remaining = _backfill_remaining()
+        if not remaining:
+            _backfill_update(status='done', current_id=None, current_title=None)
+            return 'done'
+        # A cancelled/interrupted job keeps its counters and picks up the rest.
+        resume = status in ('running', 'cancelled')
+        attempted = ((state['attempted'] if state else 0) or 0) if resume else 0
+        filled = ((state['filled'] if state else 0) or 0) if resume else 0
+        _backfill_cancel.clear()
+        started = {} if resume else {'started_at': 'CURRENT_TIMESTAMP'}
+        _backfill_update(status='running', attempted=attempted, filled=filled,
+                         total=attempted + remaining, current_id=None,
+                         current_title=None, error=None, **started)
+        thread = threading.Thread(target=_genre_backfill_worker, daemon=True)
+        _backfill_thread[0] = thread
+        thread.start()
+        return 'running'
+
+
+def cancel_genre_backfill():
+    """Asks a running backfill to stop after the lookup in flight. Attempted
+    tracks stay stamped, so pressing Start again resumes from there."""
+    _backfill_cancel.set()
+
+
+def resume_genre_backfill():
+    """Restarts a job the previous process left running, at startup, so a quit
+    or restart continues the backfill instead of silently abandoning it."""
+    state = _backfill_state()
+    if state and state['status'] == 'running' and _backfill_remaining():
+        _log('Resuming interrupted genre backfill')
+        start_genre_backfill()
+
+
+def maybe_auto_genre_backfill(reason='scan'):
+    """Starts the whole-library genre backfill automatically when the
+    "sweep genres after scans" setting is on (AUTO_GENRE_BACKFILL). Called after
+    each library scan and when new files land, so tracks that arrive without a
+    genre get filled without pressing Start. A no-op when the setting is off, a
+    worker is already running, or no track is outstanding -- so it is safe to
+    call on every scan."""
+    if not AUTO_GENRE_BACKFILL:
+        return
+    thread = _backfill_thread[0]
+    if thread and thread.is_alive():
+        return
+    remaining = _backfill_remaining()
+    if not remaining:
+        return
+    _log(f"Auto-starting genre backfill after {reason}: {remaining} track(s) outstanding")
+    start_genre_backfill()
+
+
+@app.route('/api/genre-backfill')
+def genre_backfill_status():
+    """Progress of the resumable genre backfill, for the UI to poll."""
+    state = _backfill_state()
+    thread = _backfill_thread[0]
+    running = bool(thread and thread.is_alive())
+    status = (state['status'] if state else 'idle') or 'idle'
+    if status == 'running' and not running:
+        # A 'running' row with no live worker (the process restarted mid-job).
+        status = 'idle'
+    remaining = _backfill_remaining()
+    return jsonify({
+        'status': status,
+        'running': running,
+        'cancelling': running and _backfill_cancel.is_set(),
+        'total': (state['total'] if state else 0) or 0,
+        'attempted': (state['attempted'] if state else 0) or 0,
+        'filled': (state['filled'] if state else 0) or 0,
+        'remaining': remaining,
+        'current_id': state['current_id'] if state else None,
+        'current_title': state['current_title'] if state else None,
+        'error': state['error'] if state else None,
+        'discogs_token': bool(DISCOGS_TOKEN),
+        'requests_per_minute': round(60.0 / DISCOGS_MIN_INTERVAL),
+        # Lower bound: every track costs at least one paced Discogs lookup.
+        'eta_seconds': int(remaining * DISCOGS_MIN_INTERVAL),
+    })
+
+
+@app.route('/api/genre-backfill/start', methods=['POST'])
+def genre_backfill_start():
+    """Starts or resumes the whole-library genre backfill."""
+    return jsonify({'ok': True, 'status': start_genre_backfill()})
+
+
+@app.route('/api/genre-backfill/cancel', methods=['POST'])
+def genre_backfill_cancel():
+    """Stops the running backfill after the lookup in flight (resumable)."""
+    cancel_genre_backfill()
+    return jsonify({'ok': True})
+
+
+def auto_cleanup_download(song_id, cleanup_download=False):
+    """Background metadata cleanup for a newly-added track. Matches it
     against Spotify and, when the match is HIGH confidence, writes the proper
     tags straight through (same path as the review tool, so the fix is recorded
-    'applied' and never re-proposed). Medium / low / no match are deliberately
-    left unscanned so they still surface in the manual review tool for the user
-    to decide -- a shaky guess only ever auto-applies when our own confidence
-    agrees it's certain."""
-    if not AUTO_CLEANUP_METADATA:
+    'applied' and never re-proposed). The independent genre-only setting fills
+    blank genres on these downloads without replacing any other tags. Medium /
+    low / no match are left for review rather than guessed."""
+    do_cleanup = cleanup_download and AUTO_CLEANUP_METADATA
+    if not do_cleanup and not AUTO_SPOTIFY_GENRE:
         return
     try:
         with get_db() as db:
@@ -1688,61 +3004,124 @@ def auto_cleanup_download(song_id):
         # overwrite tags the user may have set by hand.
         if s['cleanup_scanned_at']:
             return
+        if not do_cleanup and (not AUTO_SPOTIFY_GENRE or s['genre']):
+            return
         title = s['title'] or clean_noise(Path(s['filepath']).stem)
         m = _spotify_search_track(title, s['artist'], s['duration_seconds'])
         if not m:
-            _log(f"Auto cleanup song {song_id}: no Spotify match ({title!r}) -- left for review")
+            if do_cleanup:
+                _log(f"Auto cleanup song {song_id}: no Spotify match ({title!r}) -- left for review")
             return
         if m.get('confidence') != 'high':
-            _log(f"Auto cleanup song {song_id}: {m['confidence']} confidence ({title!r}) -- left for review")
+            if do_cleanup:
+                _log(f"Auto cleanup song {song_id}: {m['confidence']} confidence ({title!r}) -- left for review")
             return
-        updates = {k: m[k] for k in ('title','artist','album','year') if m.get(k)}
-        genre = _spotify_artist_genre(m.get('artist_id'))
-        if genre:
-            updates['genre'] = genre
-        if _write_cleanup_fix(song_id, updates, m.get('spotify_id')):
-            _log(f"Auto cleanup song {song_id}: applied {list(updates)} (high confidence)")
+        updates = {k: m[k] for k in ('title','artist','album','year') if do_cleanup and m.get(k)}
+        genre = None
+        if do_cleanup or (AUTO_SPOTIFY_GENRE and not s['genre']):
+            genre, source = resolve_genre(
+                m.get('title') or title, m.get('artist') or s['artist'],
+                m.get('artist_id'))
+            if genre:
+                _log(f"Genre for song {song_id}: {genre!r} from {source}")
+        if do_cleanup:
+            if genre:
+                updates['genre'] = genre
+            if _write_cleanup_fix(song_id, updates, m.get('spotify_id')):
+                _log(f"Auto cleanup song {song_id}: applied {list(updates)} (high confidence)")
+        elif AUTO_SPOTIFY_GENRE and not s['genre']:
+            if _write_spotify_genre_if_missing(song_id, s['filepath'], genre):
+                _log(f"Spotify genre song {song_id}: applied {genre!r}")
     except Exception as e:
         _log(f"Auto cleanup failed for song {song_id}: {e}")
 
 @app.route('/api/songs/<int:song_id>', methods=['PATCH'])
 def update_song(song_id):
-    data = request.json
+    data = request.json or {}
     allowed = ['title','artist','album','year','genre','bpm','musical_key']
     updates = {k:v for k,v in data.items() if k in allowed}
-    if not updates: return jsonify({'error':'no valid fields'}),400
+    wants_tags = 'tags' in data
+    if not updates and not wants_tags: return jsonify({'error':'no valid fields'}),400
+    # The genre field holds genres only: a '#tag' typed here is saved as a tag
+    # instead (and the response names it, so nothing disappears silently).
+    extracted = []
+    if 'genre' in updates:
+        updates['genre'], extracted = split_genre_tags(updates['genre'])
     with get_db() as db:
         row = db.execute('SELECT filepath FROM songs WHERE id=?',(song_id,)).fetchone()
         if not row: return jsonify({'error':'not found'}),404
         filepath = row['filepath']
-        sets = ','.join(f'{k}=?' for k in updates)
-        db.execute(f'UPDATE songs SET {sets} WHERE id=?', (*updates.values(),song_id))
-        db.commit()
-    write_metadata(filepath,
-        title=updates.get('title'), artist=updates.get('artist'),
-        album=updates.get('album'), year=updates.get('year'),
-        genre=updates.get('genre'), bpm=updates.get('bpm'))
-    return jsonify({'ok':True})
+        if updates:
+            sets = ','.join(f'{k}=?' for k in updates)
+            db.execute(f'UPDATE songs SET {sets} WHERE id=?', (*updates.values(),song_id))
+            db.commit()
+    file_fields = {k:v for k,v in updates.items() if k != 'genre'}
+    if file_fields:
+        write_metadata(filepath,
+            title=file_fields.get('title'), artist=file_fields.get('artist'),
+            album=file_fields.get('album'), year=file_fields.get('year'),
+            bpm=file_fields.get('bpm'))
+    if 'genre' in updates:
+        write_file_genre(filepath, updates['genre'])
+    added, removed = [], []
+    if wants_tags:
+        added, removed = set_song_tags(song_id, _tags_from_payload(data.get('tags')))
+    if extracted:
+        added = added + add_song_tags(song_id, extracted)
+    if added or removed:
+        sync_song_comment(song_id)
+        queue_auto_export()
+    return jsonify({'ok':True, 'tags_added':added, 'tags_removed':removed,
+                    'tags_extracted':extracted})
 
 @app.route('/api/songs/batch', methods=['PATCH'])
 def batch_update():
-    data    = request.json
+    """Edits the selection. Blank fields keep each song's own value; a genre
+    stays a genre (a '#tag' typed in the genre field becomes a tag) and the
+    Tags field replaces the selection's tags."""
+    data    = request.json or {}
     ids     = data.get('ids',[])
     allowed = ['title','artist','album','year','genre','bpm','musical_key']
     updates = {k:v for k,v in data.items() if k in allowed and v not in (None,'')}
-    if not ids or not updates: return jsonify({'error':'missing ids or fields'}),400
+    wants_tags = 'tags' in data
+    if not ids or (not updates and not wants_tags):
+        return jsonify({'error':'missing ids or fields'}),400
+    extracted = []
+    if 'genre' in updates:
+        updates['genre'], extracted = split_genre_tags(updates['genre'])
     with get_db() as db:
         for song_id in ids:
             row = db.execute('SELECT filepath FROM songs WHERE id=?',(song_id,)).fetchone()
             if not row: continue
-            sets = ','.join(f'{k}=?' for k in updates)
-            db.execute(f'UPDATE songs SET {sets} WHERE id=?', (*updates.values(),song_id))
-            write_metadata(row['filepath'],
-                title=updates.get('title'), artist=updates.get('artist'),
-                album=updates.get('album'), year=updates.get('year'),
-                genre=updates.get('genre'), bpm=updates.get('bpm'))
+            if updates:
+                sets = ','.join(f'{k}=?' for k in updates)
+                db.execute(f'UPDATE songs SET {sets} WHERE id=?', (*updates.values(),song_id))
+            if 'genre' in updates:
+                write_file_genre(row['filepath'], updates['genre'])
+            file_fields = {k:v for k,v in updates.items() if k != 'genre'}
+            if file_fields:
+                write_metadata(row['filepath'],
+                    title=file_fields.get('title'), artist=file_fields.get('artist'),
+                    album=file_fields.get('album'), year=file_fields.get('year'),
+                    bpm=file_fields.get('bpm'))
         db.commit()
-    return jsonify({'ok':True,'updated':len(ids)})
+    tagged = 0
+    if wants_tags or extracted:
+        wanted = _tags_from_payload(data.get('tags')) if wants_tags else []
+        for song_id in ids:
+            changed = []
+            if wants_tags:
+                added, _ = set_song_tags(song_id, wanted)
+                changed += added
+            if extracted:
+                changed += add_song_tags(song_id, extracted)
+            if changed:
+                sync_song_comment(song_id)
+                tagged += len(changed)
+    if extracted or tagged:
+        queue_auto_export()
+    return jsonify({'ok':True,'updated':len(ids),'tags_added':tagged,
+                    'tags_extracted':extracted})
 
 @app.route('/api/songs/<int:song_id>', methods=['DELETE'])
 def delete_song(song_id):
@@ -1770,6 +3149,12 @@ def delete_folder():
     if not folder or '/' in folder or folder in ('.','..'):
         return jsonify({'error':'Invalid folder name'}), 400
     folder_path = os.path.join(MUSIC_DIR, folder)
+    # Never treat the library root itself as deletable (a path mixup could
+    # otherwise wipe the whole music collection).
+    if os.path.abspath(folder_path) == os.path.abspath(MUSIC_DIR).rstrip(os.sep):
+        return jsonify({'error': 'Refusing to delete the library root'}), 400
+    if _music_dir_job['active']:
+        return jsonify({'error': 'A music-folder switch is running'}), 409
     prefix = folder_path.rstrip(os.sep) + os.sep
     with get_db() as db:
         rows = db.execute('SELECT id, filepath FROM songs').fetchall()
@@ -1924,6 +3309,44 @@ def search_folder():
     return jsonify({'results': results[:50], 'used': 'spotlight' if results is not None else 'walk'})
 
 
+@app.route('/api/folders/peek')
+def peek_folder():
+    """Quick look inside a folder for the music-folder switcher: how many audio
+    files it holds (top level + all subfolders) and whether it is empty. Lets
+    the UI say 'this folder already has songs in it' before anything changes."""
+    raw = (request.args.get('path') or '').strip()
+    path = os.path.abspath(os.path.expanduser(raw))
+    if not os.path.isdir(path):
+        return jsonify({'error': 'Folder not found'}), 400
+    top, total = 0, 0
+    for root, _, files in os.walk(path):
+        n = sum(1 for f in files if f.lower().endswith(AUDIO_EXTS))
+        total += n
+        if root == path:
+            top = n
+    return jsonify({'path': path, 'audio_files': total, 'top_level': top,
+                    'empty': total == 0})
+
+
+@app.route('/api/folders/create', methods=['POST'])
+def create_folder():
+    """Creates a new folder (parents included) for the 'new library here' flow.
+    Returns the created path so the UI can pass it straight to the switch."""
+    raw = (request.json or {}).get('folder', '').strip()
+    if not raw:
+        return jsonify({'error': 'Folder path required'}), 400
+    path = os.path.abspath(os.path.expanduser(raw))
+    if path == '/':
+        return jsonify({'error': 'Refusing to create /'}), 400
+    if os.path.isdir(path):
+        return jsonify({'path': path, 'existed': True})
+    try:
+        os.makedirs(path)
+    except OSError as e:
+        return jsonify({'error': f'Could not create folder: {e}'}), 400
+    return jsonify({'path': path, 'existed': False})
+
+
 # -- EXTERNAL FOLDER IMPORT ---------------------------------------------------
 # Lets you point at any folder on your Mac (not just the main library folder)
 # and pull its audio files into your library. Useful for songs you downloaded
@@ -2041,10 +3464,15 @@ def import_folder():
                         crate_assignments.setdefault('__explicit__', []).append(song_id)
 
                     if auto_genre_by_subfolder and parent_folder_name:
-                        write_metadata(dest_path, genre=parent_folder_name)
+                        # A folder called '#demos' means a tag, not a genre.
+                        folder_genre, folder_tags = split_genre_tags(parent_folder_name)
+                        write_file_genre(dest_path, folder_genre)
                         db.execute('UPDATE songs SET genre=? WHERE id=?',
-                            (parent_folder_name, song_id))
+                            (folder_genre, song_id))
                         db.commit()
+                        if folder_tags:
+                            add_song_tags(song_id, folder_tags, db)
+                    schedule_auto_cleanup(song_id)
 
             download_status[job_id]['done'] += 1
 
@@ -2065,6 +3493,9 @@ def import_folder():
             db.commit()
 
         download_status[job_id]['status'] = 'success'
+        # Imported tracks missing a genre are swept up by the same auto-sweep
+        # that follows a scan (a no-op unless the setting is on).
+        maybe_auto_genre_backfill('folder import')
         added = len(download_status[job_id]['added_song_ids'])
         dupes = download_status[job_id]['skipped_duplicate']
         crates_note = ''
@@ -2096,6 +3527,9 @@ def download_spotify_list():
     urls = data.get('urls', [])
     subfolder = data.get('subfolder')
     crate_id = data.get('crate_id')
+    # Accepts both shapes callers use: a list (what the Raycast script sends,
+    # e.g. ['#peak-hour', '#tool']) and a string ('#peak-hour #tool').
+    tags = _tags_from_payload(data.get('tags'))
 
     if not urls:
         return jsonify({'error': 'No URLs provided'}), 400
@@ -2137,7 +3571,8 @@ def download_spotify_list():
                 album=info.get('album'),
                 year=info.get('year'),
                 subfolder=subfolder,
-                crate_id=crate_id
+                crate_id=crate_id,
+                tags=tags
             )
             result = download_status.get(job_id, {})
             if result.get('status') == 'failed':
@@ -2167,6 +3602,7 @@ def download_list():
     text = data.get('text', '').strip()
     subfolder = data.get('subfolder')
     crate_id = data.get('crate_id')
+    tags = _tags_from_payload(data.get('tags'))
 
     if not text:
         return jsonify({'error': 'No text provided'}), 400
@@ -2205,7 +3641,7 @@ def download_list():
 
     def download_batch():
         for query in tracks:
-            do_download(query, subfolder=subfolder, crate_id=crate_id)
+            do_download(query, subfolder=subfolder, crate_id=crate_id, tags=tags)
             st = download_status[batch_id]
             job_id = hashlib.md5(query.encode()).hexdigest()[:16]
             result = download_status.get(job_id, {})
@@ -2238,6 +3674,7 @@ def download():
     query    = data.get('query','')
     subfolder = data.get('subfolder')
     crate_id = data.get('crate_id')
+    tags     = _tags_from_payload(data.get('tags'))
 
     if 'open.spotify.com/track/' in query:
         info = get_track_info(query)
@@ -2245,7 +3682,7 @@ def download():
             download_status[info['id']] = {'status':'downloading','query':query}
             threading.Thread(target=do_download, args=[
                 f"{info['artist']} {info['title']}", info['id'],
-                info['title'], info['artist'], info.get('album'), info.get('year'), subfolder, crate_id
+                info['title'], info['artist'], info.get('album'), info.get('year'), subfolder, crate_id, tags
             ]).start()
             return jsonify({'status':'queued','track':info})
         return jsonify({'status':'failed','error':'Could not fetch Spotify info'})
@@ -2265,8 +3702,8 @@ def download():
                 (already_have if ex else missing).append(t)
         def dl_playlist():
             for t in missing:
-                do_download(            f"{t['artist']} {t['title']}", t['id'],
-                    t['title'], t['artist'], t.get('album'), t.get('year'), subfolder, crate_id)
+                do_download(f"{t['artist']} {t['title']}", t['id'],
+                    t['title'], t['artist'], t.get('album'), t.get('year'), subfolder, crate_id, tags)
         threading.Thread(target=dl_playlist).start()
         return jsonify({
             'status':'queued',
@@ -2279,7 +3716,7 @@ def download():
     else:
         job_id = hashlib.md5(query.encode()).hexdigest()[:16]
         download_status[job_id] = {'status':'downloading','query':query}
-        threading.Thread(target=do_download, args=[query,None,None,None,None,None,subfolder,crate_id]).start()
+        threading.Thread(target=do_download, args=[query,None,None,None,None,None,subfolder,crate_id,tags]).start()
         return jsonify({'status':'queued','query':query,'job_id':job_id})
 
 @app.route('/api/download-status/<path:job_id>')
@@ -2453,14 +3890,22 @@ def merge_execute():
         # Write merged metadata into the DB and the actual file
         allowed = ['title', 'artist', 'album', 'year', 'genre', 'bpm', 'musical_key']
         updates = {k: v for k, v in fields.items() if k in allowed and v not in (None, '')}
+        # A '#tag' in the merged genre is a tag, not a genre.
+        merged_tags = []
+        if 'genre' in updates:
+            updates['genre'], merged_tags = split_genre_tags(updates['genre'])
         if updates:
             sets = ','.join(f'{k}=?' for k in updates)
             db.execute(f'UPDATE songs SET {sets} WHERE id=?', (*updates.values(), keeper_id))
             db.commit()
+            write_file_genre(keeper['filepath'], updates.get('genre'))
             write_metadata(keeper['filepath'],
                 title=updates.get('title'), artist=updates.get('artist'),
                 album=updates.get('album'), year=updates.get('year'),
-                genre=updates.get('genre'), bpm=updates.get('bpm'))
+                bpm=updates.get('bpm'))
+            if merged_tags:
+                add_song_tags(keeper_id, merged_tags, db)
+            db.commit()
 
         # Transfer crate memberships from losers to the keeper
         for loser_id in loser_ids:
@@ -2473,17 +3918,24 @@ def merge_execute():
             db.execute('DELETE FROM crate_songs WHERE song_id=?', (loser_id,))
         db.commit()
 
+        # Tags move to the keeper the same way crate memberships do, so merging
+        # duplicates never silently drops a tag.
+        for loser_id in loser_ids:
+            inherited = get_song_tags(loser_id, db)
+            if inherited:
+                add_song_tags(keeper_id, inherited, db)
+
         # Repoint transitions involving losers to the keeper (deduplicated) so
         # mix notes survive duplicate cleanup -- mirroring the crate transfer.
         for loser_id in loser_ids:
-            # outgoing: loser is the source -- becomes keeper -> target (dropped
-            # if the target is the keeper itself, which would be a self-link)
-            for row in db.execute('SELECT id, to_song_id, to_text FROM transitions WHERE from_song_id=?',
+            # A mashup row SOURCED by the loser is re-based onto the keeper
+            # (dropped if its output would become the keeper itself).
+            for row in db.execute('SELECT id, to_song_id, to_text FROM transitions WHERE from_song_id=? AND is_mashup_track=1',
                     (loser_id,)).fetchall():
                 if row['to_song_id'] == keeper_id:
                     db.execute('DELETE FROM transitions WHERE id=?', (row['id'],))
                     continue
-                dup = db.execute('SELECT 1 FROM transitions WHERE from_song_id=? AND to_song_id IS ? AND to_text IS ?',
+                dup = db.execute('SELECT 1 FROM transitions WHERE from_song_id=? AND is_mashup_track=1 AND to_song_id IS ? AND to_text IS ?',
                     (keeper_id, row['to_song_id'], row['to_text'])).fetchone()
                 if dup:
                     db.execute('DELETE FROM transitions WHERE id=?', (row['id'],))
@@ -2510,6 +3962,12 @@ def merge_execute():
             row = db.execute('SELECT filepath FROM songs WHERE id=?', (loser_id,)).fetchone()
             if row and os.path.exists(row['filepath']):
                 os.remove(row['filepath'])
+            # Repoint mashup-ingredient references first (the delete below
+            # would NULL them) so a kept mashup stays consistent with the
+            # kept track instead of silently losing its input.
+            db.execute('UPDATE transitions SET mashup_input_song_id=? '
+                       'WHERE is_mashup_track=1 AND mashup_input_song_id=?',
+                       (keeper_id, loser_id))
             _delete_song_rows(db, [loser_id])
         db.commit()
 
@@ -2577,6 +4035,153 @@ def get_genres():
             if g: genres.add(g)
     return jsonify(sorted(genres))
 
+# -- TAGS API -------------------------------------------------------------
+# Tags have their own tables and their own endpoints; the genre field is never
+# used to carry one. These are the only ways a tag is created, renamed or
+# removed, and every change also refreshes the files' [DJ Library] comments.
+
+@app.route('/api/tags')
+def list_tags():
+    """Every tag in use with how many songs carry it, most-used first -- feeds
+    the tag autocomplete and the review screen."""
+    with get_db() as db:
+        rows = db.execute('''SELECT t.id, t.name, COUNT(st.song_id) AS count
+            FROM tags t LEFT JOIN song_tags st ON st.tag_id = t.id
+            GROUP BY t.id ORDER BY count DESC, lower(t.name)''').fetchall()
+    return jsonify([dict(r) for r in rows])
+
+@app.route('/api/tags/<int:tag_id>', methods=['PATCH'])
+def rename_tag(tag_id):
+    """Renames a tag everywhere, or merges it into an existing tag when the new
+    name is already taken -- so a typo never splits one tag in two."""
+    data = request.json or {}
+    name = clean_tag(data.get('name'))
+    if not name:
+        return jsonify({'error': 'A tag name is required'}), 400
+    with get_db() as db:
+        row = db.execute('SELECT id FROM tags WHERE id=?', (tag_id,)).fetchone()
+        if not row:
+            return jsonify({'error': 'not found'}), 404
+        other = db.execute('SELECT id FROM tags WHERE lower(name)=lower(?) AND id!=?',
+                           (name, tag_id)).fetchone()
+        merged = False
+        if other:
+            db.executemany('INSERT OR IGNORE INTO song_tags (song_id, tag_id) VALUES(?,?)',
+                [(r['song_id'], other['id']) for r in
+                 db.execute('SELECT song_id FROM song_tags WHERE tag_id=?', (tag_id,)).fetchall()])
+            db.execute('DELETE FROM song_tags WHERE tag_id=?', (tag_id,))
+            db.execute('DELETE FROM tags WHERE id=?', (tag_id,))
+            tag_id, merged = other['id'], True
+            name = db.execute('SELECT name FROM tags WHERE id=?', (tag_id,)).fetchone()['name']
+        else:
+            db.execute('UPDATE tags SET name=? WHERE id=?', (name, tag_id))
+        db.commit()
+        song_ids = [r['song_id'] for r in
+                    db.execute('SELECT song_id FROM song_tags WHERE tag_id=?', (tag_id,)).fetchall()]
+    for song_id in song_ids:
+        sync_song_comment(song_id)
+    if song_ids:
+        queue_auto_export()
+    return jsonify({'ok': True, 'id': tag_id, 'name': name,
+                    'merged': merged, 'songs': len(song_ids)})
+
+@app.route('/api/tags/<int:tag_id>', methods=['DELETE'])
+def delete_tag(tag_id):
+    """Removes a tag from every song it is on and deletes the tag itself."""
+    with get_db() as db:
+        row = db.execute('SELECT name FROM tags WHERE id=?', (tag_id,)).fetchone()
+        if not row:
+            return jsonify({'error': 'not found'}), 404
+        song_ids = [r['song_id'] for r in
+                    db.execute('SELECT song_id FROM song_tags WHERE tag_id=?', (tag_id,)).fetchall()]
+        db.execute('DELETE FROM song_tags WHERE tag_id=?', (tag_id,))
+        db.execute('DELETE FROM tags WHERE id=?', (tag_id,))
+        db.commit()
+    for song_id in song_ids:
+        sync_song_comment(song_id)
+    if song_ids:
+        queue_auto_export()
+    return jsonify({'ok': True, 'name': row['name'], 'songs': len(song_ids)})
+
+@app.route('/api/songs/<int:song_id>/tags', methods=['POST'])
+def update_song_tags(song_id):
+    """Adds and/or removes tags on one song without touching its genre -- what
+    the metadata editor and the smart-crate stamping use. Body:
+    {'add': [...], 'remove': [...]}; an absent list changes nothing."""
+    data = request.json or {}
+    for key in ('add', 'remove'):
+        if key in data and not isinstance(data[key], list):
+            return jsonify({'error': f'{key} must be a list of tags'}), 400
+    with get_db() as db:
+        exists = db.execute('SELECT 1 FROM songs WHERE id=?', (song_id,)).fetchone()
+    if not exists:
+        return jsonify({'error': 'not found'}), 404
+    added = add_song_tags(song_id, data.get('add'))
+    removed = remove_song_tags(song_id, data.get('remove'))
+    if added or removed:
+        sync_song_comment(song_id)
+        queue_auto_export()
+    return jsonify({'ok': True, 'added': added, 'removed': removed,
+                    'tags': get_song_tags(song_id)})
+
+@app.route('/api/tag-separation')
+def tag_separation_status():
+    """Candidates for the Tools review screen: every genre token still carrying
+    the '#' marker, plus tokens on two songs or fewer (usually a tag rather than
+    a genre). Read-only -- nothing moves until the POST below."""
+    with get_db() as db:
+        rows = db.execute("SELECT genre FROM songs "
+                          "WHERE genre IS NOT NULL AND trim(genre)!=''").fetchall()
+    counts = {}
+    for row in rows:
+        for token in str(row['genre']).split(';'):
+            token = token.strip()
+            if not token:
+                continue
+            entry = counts.setdefault(token.lower(),
+                                      {'token': token, 'count': 0, 'marked': token.startswith('#')})
+            entry['count'] += 1
+    candidates = [c for c in counts.values() if c['marked'] or c['count'] <= 2]
+    candidates.sort(key=lambda c: (not c['marked'], c['count'], c['token'].lower()))
+    return jsonify({'candidates': candidates,
+                    'marked': sum(1 for c in candidates if c['marked'])})
+
+@app.route('/api/tag-separation', methods=['POST'])
+def apply_tag_separation():
+    """Moves one token between genre and tags across the whole library, from the
+    review screen. Nothing else about a song changes."""
+    data = request.json or {}
+    token = str(data.get('token') or '').strip()
+    action = data.get('action')
+    if not token or action not in ('tag', 'genre'):
+        return jsonify({'error': "token and action ('tag' or 'genre') are required"}), 400
+    as_tag = action == 'tag'
+    name = clean_tag(token)
+    if as_tag and not name:
+        return jsonify({'error': 'That token cannot be a tag'}), 400
+    with get_db() as db:
+        rows = db.execute('SELECT id, filepath, genre FROM songs WHERE genre LIKE ?',
+                          (f'%{token}%',)).fetchall()
+    moved = []
+    for row in rows:
+        parts = [p.strip() for p in (row['genre'] or '').split(';') if p.strip()]
+        if not any(p.lower() == token.lower() for p in parts):
+            continue                      # a longer token merely contains it
+        genre = clean_genre('; '.join(p for p in parts if p.lower() != token.lower()))
+        if not genre and not as_tag:
+            genre = token.lstrip('#').strip() or None
+        with get_db() as db:
+            db.execute('UPDATE songs SET genre=? WHERE id=?', (genre, row['id']))
+            db.commit()
+        if as_tag:
+            add_song_tags(row['id'], [name])
+        write_file_genre(row['filepath'], genre)
+        sync_song_comment(row['id'])
+        moved.append(row['id'])
+    if moved:
+        queue_auto_export()
+    return jsonify({'ok': True, 'action': action, 'token': token, 'songs': len(moved)})
+
 # -- CRATES API ----------------------------------------------------------
 
 @app.route('/api/crates')
@@ -2634,13 +4239,13 @@ def get_crate_songs(crate_id):
         crate = dict(crate)
     if crate['is_smart']:
         rules = json.loads(crate['rules'] or '[]')
-        return jsonify(evaluate_smart_crate(rules))
+        return jsonify(_with_tags(evaluate_smart_crate(rules)))
     else:
         with get_db() as db:
             rows = db.execute('''SELECT s.* FROM songs s
                 JOIN crate_songs cs ON s.id=cs.song_id
                 WHERE cs.crate_id=? ORDER BY s.artist,s.title''',(crate_id,)).fetchall()
-        return jsonify([dict(r) for r in rows])
+        return jsonify(_with_tags([dict(r) for r in rows]))
 
 
 @app.route('/api/crates/reorder', methods=['POST'])
@@ -2741,13 +4346,17 @@ def get_transitions(song_id):
         if not db.execute('SELECT id FROM songs WHERE id=?', (song_id,)).fetchone():
             return jsonify({'error': 'Song not found'}), 404
         outgoing = db.execute('''SELECT t.id, t.to_song_id, t.to_text, t.notes, t.tag, t.status, t.folder_id,
+                t.is_mashup_track, t.mashup_input_song_id, t.mashup_input_text,
                 s.title AS to_title, s.artist AS to_artist,
-                s.filename AS to_filename, s.bpm AS to_bpm, s.musical_key AS to_key
+                s.filename AS to_filename, s.bpm AS to_bpm, s.musical_key AS to_key,
+                mis.title AS mi_title, mis.artist AS mi_artist
             FROM transitions t
             LEFT JOIN songs s ON s.id = t.to_song_id
+            LEFT JOIN songs mis ON mis.id = t.mashup_input_song_id
             WHERE t.from_song_id = ?
             ORDER BY t.created_at, t.id''', (song_id,)).fetchall()
         incoming = db.execute('''SELECT t.id, t.from_song_id, t.notes, t.tag, t.status, t.folder_id,
+                t.is_mashup_track,
                 s.title AS from_title, s.artist AS from_artist, s.filename AS from_filename
             FROM transitions t
             JOIN songs s ON s.id = t.from_song_id
@@ -2759,7 +4368,11 @@ def get_transitions(song_id):
 @app.route('/api/songs/<int:song_id>/transitions', methods=['POST'])
 def add_transition(song_id):
     """Creates a transition from song_id to either a library song (to_song_id)
-    or a text-only track name (to_text). Exactly one of the two is required."""
+    or a text-only track name (to_text). Exactly one of the two is required.
+    With is_mashup_track=1 the row instead records a MASHUP whose source is
+    song_id: the target is the output song it lands into, and
+    mashup_input_song_id / mashup_input_text (exactly one) name the input
+    song it blends in from."""
     data = request.json or {}
     to_song_id = data.get('to_song_id')
     to_text = (data.get('to_text') or '').strip()
@@ -2768,6 +4381,9 @@ def add_transition(song_id):
     status = (data.get('status') or 'confirmed').strip()
     if status not in ('confirmed', 'to_try'):
         status = 'confirmed'
+    is_mashup = 1 if data.get('is_mashup_track') else 0
+    mi_song_id = data.get('mashup_input_song_id')
+    mi_text = (data.get('mashup_input_text') or '').strip()
     folder_id = data.get('folder_id')
     if folder_id is not None:
         try:
@@ -2779,11 +4395,17 @@ def add_transition(song_id):
         return jsonify({'error': 'Pick either a library song OR a text target, not both'}), 400
     if to_song_id is None and not to_text:
         return jsonify({'error': 'Pick a target song or enter a track name'}), 400
+    if is_mashup and mi_song_id is None and not mi_text:
+        return jsonify({'error': 'A mashup needs an input song — pick one or enter its name'}), 400
 
     try:
         to_song_id = int(to_song_id) if to_song_id is not None else None
     except (TypeError, ValueError):
         return jsonify({'error': 'Invalid target song'}), 400
+    try:
+        mi_song_id = int(mi_song_id) if mi_song_id is not None else None
+    except (TypeError, ValueError):
+        return jsonify({'error': 'Invalid input song'}), 400
 
     with get_db() as db:
         if not db.execute('SELECT id FROM songs WHERE id=?', (song_id,)).fetchone():
@@ -2795,8 +4417,13 @@ def add_transition(song_id):
                 return jsonify({'error': 'A song cannot transition into itself'}), 400
             if not db.execute('SELECT id FROM songs WHERE id=?', (to_song_id,)).fetchone():
                 return jsonify({'error': 'Target song not found'}), 404
-        db.execute('''INSERT INTO transitions (from_song_id, to_song_id, to_text, notes, tag, status, folder_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?)''', (song_id, to_song_id, to_text or None, notes or None, tag or None, status, folder_id))
+        if mi_song_id is not None and not db.execute('SELECT id FROM songs WHERE id=?', (mi_song_id,)).fetchone():
+            return jsonify({'error': 'Input song not found'}), 404
+        db.execute('''INSERT INTO transitions (from_song_id, to_song_id, to_text, notes, tag, status, folder_id,
+                is_mashup_track, mashup_input_song_id, mashup_input_text)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+            (song_id, to_song_id, to_text or None, notes or None, tag or None, status, folder_id,
+             is_mashup, mi_song_id if is_mashup else None, (mi_text or None) if is_mashup else None))
         db.commit()
         tid = db.execute('SELECT last_insert_rowid()').fetchone()[0]
     sync_transitions_after_change(song_id)
@@ -2808,22 +4435,26 @@ def list_transitions():
     newest first -- used by the Transitions sidebar tab."""
     with get_db() as db:
         rows = db.execute('''SELECT t.id, t.from_song_id, t.to_song_id, t.to_text, t.notes, t.tag, t.status,
-                t.folder_id, tf.name AS folder_name,
+                t.folder_id, t.is_mashup_track, t.mashup_input_song_id, t.mashup_input_text,
+                tf.name AS folder_name,
                 fs.title AS from_title, fs.artist AS from_artist, fs.filename AS from_filename,
-                ts.title AS to_title, ts.artist AS to_artist, ts.filename AS to_filename
+                ts.title AS to_title, ts.artist AS to_artist, ts.filename AS to_filename,
+                tis.title AS mi_title, tis.artist AS mi_artist
             FROM transitions t
             JOIN songs fs ON fs.id = t.from_song_id
             LEFT JOIN songs ts ON ts.id = t.to_song_id
+            LEFT JOIN songs tis ON tis.id = t.mashup_input_song_id
             LEFT JOIN transition_folders tf ON tf.id = t.folder_id
             ORDER BY t.created_at DESC, t.id DESC''').fetchall()
     return jsonify([dict(r) for r in rows])
 
 @app.route('/api/transitions/<int:tid>', methods=['PATCH'])
 def update_transition(tid):
-    """Edits a transition's notes/tag in place."""
+    """Edits a transition's notes/tag in place, or its mashup input/output
+    (only accepted on mashup rows; either part may be a library song or text)."""
     data = request.json or {}
     with get_db() as db:
-        row = db.execute('SELECT from_song_id FROM transitions WHERE id=?', (tid,)).fetchone()
+        row = db.execute('SELECT from_song_id, is_mashup_track FROM transitions WHERE id=?', (tid,)).fetchone()
         if not row:
             return jsonify({'error': 'Transition not found'}), 404
         if 'notes' in data:
@@ -2847,6 +4478,33 @@ def update_transition(tid):
                 if not db.execute('SELECT id FROM transition_folders WHERE id=?', (fid,)).fetchone():
                     return jsonify({'error': 'Folder not found'}), 404
                 db.execute('UPDATE transitions SET folder_id=? WHERE id=?', (fid, tid))
+        if row['is_mashup_track'] and ('mashup_input_song_id' in data or 'mashup_input_text' in data
+                                       or 'to_song_id' in data or 'to_text' in data):
+            cur = db.execute('SELECT to_song_id, to_text, mashup_input_song_id, mashup_input_text FROM transitions WHERE id=?', (tid,)).fetchone()
+            out_id = data.get('to_song_id', cur['to_song_id'])
+            out_text = (data.get('to_text') if 'to_text' in data else cur['to_text']) or None
+            if out_text is not None:
+                out_text = str(out_text).strip() or None
+            in_id = data.get('mashup_input_song_id', cur['mashup_input_song_id'])
+            in_text = (data.get('mashup_input_text') if 'mashup_input_text' in data else cur['mashup_input_text']) or None
+            if in_text is not None:
+                in_text = str(in_text).strip() or None
+            try:
+                out_id = int(out_id) if out_id is not None else None
+                in_id = int(in_id) if in_id is not None else None
+            except (TypeError, ValueError):
+                return jsonify({'error': 'Invalid song'}), 400
+            if bool(out_id) == bool(out_text):
+                return jsonify({'error': 'Pick either a library song OR a text target, not both'}), 400
+            if bool(in_id) == bool(in_text):
+                return jsonify({'error': 'Pick either a library song OR a text input, not both'}), 400
+            if out_id is not None and not db.execute('SELECT id FROM songs WHERE id=?', (out_id,)).fetchone():
+                return jsonify({'error': 'Output song not found'}), 404
+            if in_id is not None and not db.execute('SELECT id FROM songs WHERE id=?', (in_id,)).fetchone():
+                return jsonify({'error': 'Input song not found'}), 404
+            db.execute('''UPDATE transitions SET to_song_id=?, to_text=?,
+                mashup_input_song_id=?, mashup_input_text=? WHERE id=?''',
+                (out_id, out_text, in_id, in_text, tid))
         db.commit()
         from_song_id = row['from_song_id']
     sync_transitions_after_change(from_song_id)
@@ -2877,12 +4535,15 @@ def list_transitions_to_try():
     """All transitions marked as 'to_try' (untested), newest first."""
     with get_db() as db:
         rows = db.execute('''SELECT t.id, t.from_song_id, t.to_song_id, t.to_text, t.notes, t.tag, t.status,
-                t.folder_id, tf.name AS folder_name,
+                t.folder_id, t.is_mashup_track, t.mashup_input_song_id, t.mashup_input_text,
+                tf.name AS folder_name,
                 fs.title AS from_title, fs.artist AS from_artist, fs.filename AS from_filename,
-                ts.title AS to_title, ts.artist AS to_artist, ts.filename AS to_filename
+                ts.title AS to_title, ts.artist AS to_artist, ts.filename AS to_filename,
+                tis.title AS mi_title, tis.artist AS mi_artist
             FROM transitions t
             JOIN songs fs ON fs.id = t.from_song_id
             LEFT JOIN songs ts ON ts.id = t.to_song_id
+            LEFT JOIN songs tis ON tis.id = t.mashup_input_song_id
             LEFT JOIN transition_folders tf ON tf.id = t.folder_id
             WHERE t.status = 'to_try'
             ORDER BY t.created_at DESC, t.id DESC''').fetchall()
@@ -2901,6 +4562,28 @@ def confirm_transition(tid):
     sync_transitions_after_change(from_song_id)
     return jsonify({'ok': True})
 
+
+@app.route('/api/mashups')
+def list_mashups():
+    """All mashup transition rows (is_mashup_track=1) with source (the mashup
+    file), output (where it lands) and input (what it blends in from) resolved,
+    newest first. Powers the sidebar Mashups tab."""
+    with get_db() as db:
+        rows = db.execute('''SELECT t.id, t.from_song_id, t.to_song_id, t.to_text,
+                t.notes, t.tag, t.status, t.folder_id, tf.name AS folder_name,
+                t.is_mashup_track, t.mashup_input_song_id, t.mashup_input_text,
+                fs.title AS from_title, fs.artist AS from_artist, fs.filename AS from_filename,
+                fs.bpm AS from_bpm, fs.musical_key AS from_key,
+                ts.title AS to_title, ts.artist AS to_artist, ts.filename AS to_filename,
+                tis.title AS mi_title, tis.artist AS mi_artist
+            FROM transitions t
+            JOIN songs fs ON fs.id = t.from_song_id
+            LEFT JOIN songs ts ON ts.id = t.to_song_id
+            LEFT JOIN songs tis ON tis.id = t.mashup_input_song_id
+            LEFT JOIN transition_folders tf ON tf.id = t.folder_id
+            WHERE t.is_mashup_track = 1
+            ORDER BY t.created_at DESC, t.id DESC''').fetchall()
+    return jsonify([dict(r) for r in rows])
 
 # -- TRANSITION FOLDERS -------------------------------------------------------
 # Optional grouping for transitions (like crates for songs). Deleting a folder
@@ -2960,6 +4643,23 @@ def delete_transition_folder(fid):
     return jsonify({'ok': True})
 
 
+# -- TRANSITION TAGS ----------------------------------------------------------
+# Tags are freeform labels on a transition ("peak hour", "energy +1", ...).
+# There is no tag table: a tag "exists" the moment a transition carries it, so
+# "creating" one is just saving it on a transition. This endpoint feeds the
+# autocomplete with the tags already in use, most-used first.
+
+@app.route('/api/transition-tags')
+def list_transition_tags():
+    """Every tag already used on a transition, with how many use it. Sorted by
+    usage (descending) then name, so the autocomplete surfaces the staples."""
+    with get_db() as db:
+        rows = db.execute('''SELECT tag, COUNT(*) AS count FROM transitions
+            WHERE tag IS NOT NULL AND trim(tag) != ''
+            GROUP BY tag ORDER BY count DESC, lower(tag)''').fetchall()
+    return jsonify([dict(r) for r in rows])
+
+
 @app.route('/api/transitions/export')
 def export_transitions():
     """All transitions as a flat CSV (Excel-friendly, UTF-8 BOM) with source and
@@ -2971,18 +4671,31 @@ def export_transitions():
                 t.to_song_id, t.to_text,
                 ts.artist AS to_artist, ts.title AS to_title,
                 ts.musical_key AS to_key, ts.bpm AS to_bpm,
+                t.is_mashup_track, t.mashup_input_song_id, t.mashup_input_text,
+                mis.artist AS mi_artist, mis.title AS mi_title,
                 t.tag, t.notes
             FROM transitions t
             JOIN songs fs ON fs.id = t.from_song_id
             LEFT JOIN songs ts ON ts.id = t.to_song_id
+            LEFT JOIN songs mis ON mis.id = t.mashup_input_song_id
             ORDER BY lower(fs.artist), lower(fs.title), t.created_at, t.id''').fetchall()
     buf = io.StringIO()
     buf.write('\ufeff')
     w = csv.writer(buf)
     w.writerow(['Source Artist', 'Source Title', 'Source Key', 'Source BPM',
                 'Target', 'Target Artist', 'Target Title', 'Target Key', 'Target BPM',
-                'Target Type', 'Tag', 'Notes'])
+                'Target Type', 'Mashup Input', 'Tag', 'Notes'])
     for r in rows:
+        if r['is_mashup_track']:
+            ttype = 'Mashup'
+            if r['mashup_input_song_id']:
+                minput = ' - '.join(x for x in (r['mi_artist'], r['mi_title']) if x) \
+                    or 'Song #' + str(r['mashup_input_song_id'])
+            else:
+                minput = r['mashup_input_text'] or ''
+        else:
+            ttype = 'Song' if r['to_song_id'] else 'Text'
+            minput = ''
         if r['to_song_id']:
             target, t_artist, t_title = r['to_title'], r['to_artist'], r['to_title']
         else:
@@ -2990,7 +4703,7 @@ def export_transitions():
             t_artist = t_title = None
         w.writerow([r['from_artist'], r['from_title'], r['from_key'], r['from_bpm'],
                     target, t_artist, t_title, r['to_key'], r['to_bpm'],
-                    'Song' if r['to_song_id'] else 'Text', r['tag'], r['notes']])
+                    ttype, minput, r['tag'], r['notes']])
     resp = Response(buf.getvalue(), mimetype='text/csv')
     resp.headers['Content-Disposition'] = 'attachment; filename=transitions.csv'
     return resp
@@ -3002,7 +4715,8 @@ def transitions_setlist():
     and BPMs, styled for printing (open it and hit Cmd+P)."""
     with get_db() as db:
         rows = db.execute('''SELECT t.id, t.from_song_id, t.to_song_id, t.to_text,
-                t.tag, t.notes,
+                t.tag, t.notes, t.is_mashup_track, t.mashup_input_song_id, t.mashup_input_text,
+                mis.artist AS mi_artist, mis.title AS mi_title,
                 fs.title AS from_title, fs.artist AS from_artist,
                 fs.musical_key AS from_key, fs.bpm AS from_bpm,
                 ts.title AS to_title, ts.artist AS to_artist,
@@ -3010,12 +4724,13 @@ def transitions_setlist():
             FROM transitions t
             JOIN songs fs ON fs.id = t.from_song_id
             LEFT JOIN songs ts ON ts.id = t.to_song_id
+            LEFT JOIN songs mis ON mis.id = t.mashup_input_song_id
             ORDER BY lower(fs.artist), lower(fs.title), t.created_at, t.id''').fetchall()
     groups = {}
     for r in rows:
         groups.setdefault(r['from_song_id'], []).append(dict(r))
     e = html.escape
-    date_str = datetime.datetime.now().strftime('%B %d, %Y')
+    date_str = datetime.now().strftime('%B %d, %Y')
     sections = []
     for ts in groups.values():
         src = ts[0]
@@ -3034,7 +4749,13 @@ def transitions_setlist():
                 if tmeta: target += f" <span class='m'>({', '.join(tmeta)})</span>"
             else:
                 target = e(t['to_text'] or 'Untitled track')
-            cells = [f"<td class='arr'>→</td><td class='tgt'>{target}</td>"]
+            arrow = '→'
+            if t['is_mashup_track']:
+                minput = ' - '.join(x for x in (t.get('mi_artist'), t.get('mi_title')) if x) \
+                    or t.get('mashup_input_text') or '?'
+                target = f"<span class='mash'>⇄ Mashup</span> (in: {e(minput)}) → {target}"
+                arrow = '↣'
+            cells = [f"<td class='arr'>{arrow}</td><td class='tgt'>{target}</td>"]
             if t.get('tag'): cells.append(f"<td class='tag'>{e(t['tag'])}</td>")
             else: cells.append('<td class="tag"></td>')
             if t.get('notes'): cells.append(f"<td class='note'>{e(t['notes'])}</td>")
@@ -3059,6 +4780,7 @@ def transitions_setlist():
   .arr {{ width: 18px; color: #999; }}
   .tag {{ width: 90px; color: #555; font-style: italic; }}
   .note {{ color: #333; }}
+  .mash {{ color: #0a7d68; font-style: italic; }}
   .empty {{ color: #666; }}
   @media print {{ body {{ margin: 10mm; }} .grp {{ page-break-inside: avoid; }} }}
 </style></head>
@@ -3068,6 +4790,27 @@ def transitions_setlist():
 {body}
 </body></html>'''
     return Response(page, mimetype='text/html')
+
+# -- USB EXPORT SERVICE WIRING -------------------------------------------------
+# Flask's application extensions own the lazily constructed service; job state
+# itself remains private to USBExporter. Late-bound helpers are resolved on use.
+_usb_exporter_lock = threading.Lock()
+
+
+def _usb_export_service():
+    with _usb_exporter_lock:
+        exporter = app.extensions.get('usb_exporter')
+        if exporter is None:
+            exporter = usb_export_module.USBExporter(
+                get_db=get_db, get_music_dir=lambda: MUSIC_DIR, crate_song_ids=crate_song_ids,
+                evaluate_smart_crate=evaluate_smart_crate,
+                build_rekordbox_xml=build_rekordbox_xml, to_camelot=to_camelot)
+            app.extensions['usb_exporter'] = exporter
+        return exporter
+
+
+app.register_blueprint(usb_export_routes.create_usb_export_blueprint(_usb_export_service))
+
 
 # -- DJ SOFTWARE EXPORT (Rekordbox XML) ----------------------------------------
 # The industry-standard interchange format: Rekordbox, Serato DJ Pro, DJUCED
@@ -3128,6 +4871,7 @@ def build_rekordbox_xml(songs, playlists):
     from xml.sax.saxutils import escape as _xesc
 
     track_ids = {s['id']: i + 1 for i, s in enumerate(songs)}
+    tags_by_song = tags_for_songs([s['id'] for s in songs])
     kinds = {'.mp3': 'MP3 File', '.wav': 'WAV File', '.aif': 'AIFF File',
              '.aiff': 'AIFF File', '.flac': 'FLAC File', '.m4a': 'M4A File',
              '.aac': 'AAC File'}
@@ -3146,8 +4890,11 @@ def build_rekordbox_xml(songs, playlists):
         ext = Path(s['filepath']).suffix.lower()
         comments = ''
         ts = outgoing_transitions_for(s['id'])
-        if ts:
-            comments = build_transition_comment(ts)
+        # Tags ride in Comments (where every DJ app shows them) while the Genre
+        # attribute stays a real genre.
+        song_tags_list = tags_by_song.get(s['id']) or []
+        if ts or song_tags_list:
+            comments = build_library_comment(ts, song_tags_list)
         tracks.append(
             '<TRACK' + attr('TrackID', track_ids[s['id']])
             + attr('Name', s.get('title') or Path(s['filepath']).stem)
@@ -3289,6 +5036,20 @@ def export_rekordbox_xml():
     return resp
 
 
+@app.route('/api/export/rekordbox-refresh', methods=['POST'])
+def refresh_rekordbox_export():
+    """Rewrites the always-current on-disk rekordbox.xml right now (the file
+    Rekordbox Bridge / Serato / DJUCED import from). Auto-export already runs
+    after every change -- this is the manual 'do it now' button, so the user
+    never has to download a copy and swap it in by hand. Returns the path plus
+    whether bytes actually changed, so the UI can say 'written' vs 'already up
+    to date'."""
+    written = write_rekordbox_xml_file()
+    return jsonify({'path': REKORDBOX_EXPORT_PATH,
+                    'written': bool(written),
+                    'exists': os.path.isfile(REKORDBOX_EXPORT_PATH)})
+
+
 @app.route('/manifest.webmanifest')
 def manifest():
     return send_from_directory('static', 'manifest.webmanifest',
@@ -3315,6 +5076,12 @@ if __name__ == '__main__':
         print("⚠  Spotify credentials not set in config.json — Spotify features disabled")
     print("DJ Library starting...")
     init_db()
+    # Move any '#tag' still sitting on a genre field into the tag store, before
+    # anything reads or rewrites genres (a no-op once a library is separated).
+    separate_genre_tags()
+    # Pick a whole-library genre backfill back up where a previous run left off
+    # (started here, before the scan, so the paced lookups run while it works).
+    resume_genre_backfill()
     # Refresh the yt-dlp binary in the background (while the library scans) so
     # the downloader never starts with a stale build that YouTube blocks.
     threading.Thread(target=refresh_ytdlp, daemon=True).start()
@@ -3329,9 +5096,7 @@ if __name__ == '__main__':
     # Guarantee the on-disk rekordbox.xml exists and is current (a no-op when
     # it already matches, so this is cheap on every launch).
     queue_auto_export()
-    observer = Observer()
-    observer.schedule(MusicFolderHandler(), MUSIC_DIR, recursive=True)
-    observer.start()
+    _start_watcher()
     print(f"Watching: {MUSIC_DIR}")
     print("Open http://localhost:3000")
     threading.Thread(target=analyze_library_bpm,daemon=True).start()

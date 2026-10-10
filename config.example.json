@@ -2,10 +2,14 @@
   "music_dir": "/Users/you/Music",
   "spotify_client_id": "",
   "spotify_client_secret": "",
+  "discogs_token": "",
   "ffmpeg_path": "/opt/homebrew/bin/ffmpeg",
   "rekordbox_export_path": "~/.dj-library/rekordbox.xml",
   "djs_software": "",
   "auto_sync_mixxx": true,
   "key_display": "camelot",
-  "auto_install_python": true
+  "auto_install_python": true,
+  "auto_cleanup_metadata": false,
+  "auto_spotify_genre": false,
+  "auto_genre_backfill": false
 }
