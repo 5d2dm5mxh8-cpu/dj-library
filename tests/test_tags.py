@@ -191,6 +191,44 @@ class FileTagContracts(TagTestBase):
                               (str(self.files[3]),)).fetchone()
         self.assertEqual(app.get_song_tags(song['id']), ['road test'])
 
+    def test_the_mixxx_comment_keeps_your_own_text_and_gains_the_tags(self):
+        """What reaches Mixxx's comment column: whatever you wrote yourself, plus
+        one [DJ Library] block carrying the tags and the transition notes."""
+        with app.get_db() as db:
+            db.execute("INSERT INTO transitions (from_song_id,to_song_id,notes,tag) "
+                       "VALUES(1,2,'long blend over the break','warm-up')")
+            db.commit()
+        app.tag_song(1, ['peak hour', 'tool'])
+        section = app.build_library_comment(app.outgoing_transitions_for(1),
+                                            app.get_song_tags(1))
+        merged = app.merge_transition_comment('gorgeous bassline', section)
+        self.assertTrue(merged.startswith('gorgeous bassline'))
+        self.assertEqual(merged.count('[DJ Library]'), 1)
+        self.assertIn('Tags: peak hour, tool', merged)
+        self.assertIn('→', merged)
+        # Re-syncing replaces the block in place instead of stacking copies.
+        self.assertEqual(app.merge_transition_comment(merged, section), merged)
+
+    def test_losing_the_last_tag_writes_the_file_section_away_but_keeps_your_comment(self):
+        """The section lives in its own COMM frame, so dropping a song's last tag
+        removes that frame while the comment the user wrote stays on the file."""
+        from mutagen.id3 import COMM
+        path = str(self.files[1])
+        id3 = ID3(path)
+        id3.add(COMM(encoding=3, lang='eng', desc='', text='gorgeous bassline'))
+        id3.save(path, v2_version=3)
+        app.tag_song(1, ['peak hour'])
+        self.assertIn('Tags: peak hour', self.comment_text(1))
+        self.assertIn('gorgeous bassline', self.comment_text(1))
+        gone = app.app.test_client().post('/api/songs/1/tags', json={'remove': ['peak hour']})
+        self.assertEqual(gone.status_code, 200, gone.get_json())
+        with app.get_db() as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) AS n FROM tags').fetchone()['n'], 0)
+        comment = self.comment_text(1)
+        self.assertNotIn('[DJ Library]', comment)
+        self.assertIn('gorgeous bassline', comment)
+        self.assertEqual(app.extract_metadata(path)[4], 'Deep House')
+
     def test_transitions_and_tags_share_one_comment_section(self):
         with app.get_db() as db:
             db.execute("INSERT INTO transitions (from_song_id,to_text,tag) VALUES(1,'Target','warm')")
