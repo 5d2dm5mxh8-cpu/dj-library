@@ -142,6 +142,8 @@ header{grid-area:header;
 .logo::before{content:"";width:22px;height:22px;border-radius:7px;flex-shrink:0;
   background:var(--cyan)}
 .logo span{color:var(--muted2);font-weight:400}
+.logo #logoName{color:var(--text);font-weight:800;min-width:0;overflow:hidden;
+  text-overflow:ellipsis;max-width:26vw}
 .search-wrap{flex:1;max-width:420px;position:relative}
 .search-wrap input{width:100%;background:var(--chip);border:1px solid var(--border);
   border-radius:10px;color:var(--text);font-size:13px;padding:8px 12px 8px 34px;
@@ -250,12 +252,6 @@ header .rule-sel:focus{border-color:var(--cyan);box-shadow:0 0 0 3px var(--cyan-
 .toast.visible{opacity:1;transform:none}
 .toast .dot{background:var(--green);box-shadow:0 0 8px rgba(50,215,75,.5)}
 
-/* +1 button acknowledgment -- brief green pulse so a muted click still answers */
-@keyframes ackPulse{0%{transform:scale(1)}
-  40%{transform:scale(1.25);background:var(--green-dim);border-color:var(--green);color:var(--green)}
-  100%{transform:scale(1)}}
-.show-btn.ack{animation:ackPulse .5s ease}
-
 /* CONTEXT MENU -- right-click on the library when songs are selected */
 .ctx-menu{position:fixed;z-index:90;display:none;flex-direction:column;min-width:240px;padding:4px;
   background-color:var(--selbar);
@@ -277,6 +273,8 @@ header .rule-sel:focus{border-color:var(--cyan);box-shadow:0 0 0 3px var(--cyan-
 .cu-conf.high{background:var(--green-dim);color:var(--green)}
 .cu-conf.medium{background:var(--yellow-dim);color:var(--yellow)}
 .cu-conf.low{background:var(--red-dim);color:var(--red)}
+.cu-src{font-family:var(--mono);font-size:9px;padding:2px 7px;border-radius:100px;
+  flex-shrink:0;background:var(--cyan-dim);color:var(--cyan)}
 .cu-diff{display:grid;grid-template-columns:52px 1fr 1fr;gap:3px 10px;
   font-family:var(--mono);font-size:10.5px}
 .cu-k{color:var(--muted);text-transform:uppercase;font-size:9px;letter-spacing:.08em;align-self:center}
@@ -284,6 +282,22 @@ header .rule-sel:focus{border-color:var(--cyan);box-shadow:0 0 0 3px var(--cyan-
 .cu-old.changed{text-decoration:line-through}
 .cu-new{color:var(--text);word-break:break-word}
 .cu-new.changed{color:var(--green)}
+/* merge-panel-style action buttons + decided states */
+.cu-actions{display:flex;gap:5px;flex-shrink:0}
+.cu-ok{background:var(--green-dim);border:1px solid var(--green);color:var(--green);
+  border-radius:7px;font-family:var(--mono);font-size:10px;padding:4px 10px;
+  cursor:pointer;transition:all .15s}
+.cu-ok:hover{background:var(--green);color:var(--on-accent)}
+.cu-ok:active{transform:scale(.95)}
+.cu-ok[disabled]{opacity:.45;cursor:default;transform:none;box-shadow:none}
+.cu-no{background:var(--chip);border:1px solid var(--border);color:var(--text2);
+  border-radius:7px;font-family:var(--mono);font-size:10px;padding:4px 10px;
+  cursor:pointer;transition:all .15s}
+.cu-no:hover{border-color:var(--red);color:var(--red);background:var(--red-dim)}
+.cu-no:active{transform:scale(.95)}
+.cu-no[disabled]{opacity:.45;cursor:default;transform:none}
+.cu-edit{display:grid;grid-template-columns:52px 1fr;gap:6px 10px;margin-top:10px;
+  padding-top:10px;border-top:1px solid var(--border)}
 
 /* FILTER BAR -- same chrome as the header: one continuous rack */
 .filter-bar{grid-area:filters;
@@ -340,7 +354,8 @@ aside{grid-area:sidebar;
   transform:translateX(-50%);background:var(--cyan);opacity:0;transition:opacity .15s}
 .gutter:hover::after,.gutter.dragging::after{opacity:.45}
 .gutter.dragging::after{opacity:.7}
-.sb-sec{padding:16px 16px 18px;border-bottom:1px solid var(--border)}
+.sb-sec{padding:16px 16px 18px;border-bottom:1px solid var(--border);
+  min-height:0;overflow-y:auto}
 .sb-label{font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;color:var(--muted);
   text-transform:uppercase;margin-bottom:10px}
 .dl-input{width:100%;background:var(--chip);border:1px solid var(--border);
@@ -349,7 +364,8 @@ aside{grid-area:sidebar;
 .dl-input::placeholder{color:var(--muted2)}
 .dl-input:hover{border-color:var(--border-strong)}
 .dl-input:focus{border-color:var(--cyan);box-shadow:0 0 0 3px var(--cyan-dim)}
-.folder-row{display:flex;gap:8px;margin-top:10px}
+.folder-row{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+.folder-row .fi{flex:1 1 120px;min-width:120px}
 .fi{flex:1;background:var(--chip);border:1px solid var(--border);border-radius:8px;
   color:var(--text);font-family:var(--mono);font-size:12px;padding:8px 10px;
   outline:none;min-width:0;transition:border-color .15s,box-shadow .15s}
@@ -363,6 +379,16 @@ aside{grid-area:sidebar;
 .btn:active{transform:scale(.94)}
 .sp{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10.5px;
   padding:4px 10px;border-radius:100px;margin-top:8px}
+/* collapsible import options in the top-left sidebar (moved out of Tools so
+   every way of getting music in lives in one place) */
+.import-opts{margin-top:10px}
+.import-opts>summary{font-family:var(--mono);font-size:10px;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--muted);cursor:pointer;user-select:none;
+  padding:4px 2px;border-radius:6px;transition:color .15s;list-style:none}
+.import-opts>summary::-webkit-details-marker{display:none}
+.import-opts>summary::before{content:"▸ ";color:var(--muted2)}
+.import-opts[open]>summary::before{content:"▾ "}
+.import-opts>summary:hover{color:var(--text2)}
 .sp.downloading{background:var(--cyan-dim);color:var(--cyan)}
 .sp.success{background:var(--green-dim);color:var(--green)}
 .sp.duplicate{background:var(--yellow-dim);color:var(--yellow)}
@@ -590,6 +616,10 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
 .ipath{font-family:var(--mono);font-size:10px;color:var(--muted);word-break:break-all;line-height:1.6}
 .iacts{display:flex;gap:8px;justify-content:flex-end;padding:14px 22px;
   border-top:1px solid var(--border);background:var(--hover)}
+/* btn-ghost defaults to full-width for the sidebar; modal footers need compact,
+   auto-sized buttons — e.g. the folder picker's Cancel was spanning the row and
+   crushing the selected-path text */
+.iacts .btn-ghost{width:auto;margin:0}
 .btn-save{background:var(--cyan);color:var(--on-accent);border:none;border-radius:9px;
   font-family:var(--mono);font-size:11px;font-weight:700;padding:8px 18px;
   cursor:pointer;transition:all .15s}
@@ -702,6 +732,35 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
 .ts-edit{flex:1;min-width:0;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
 .ts-empty{font-family:var(--mono);font-size:10.5px;color:var(--muted2);padding:4px 2px;line-height:1.5}
 
+/* transition tag combobox: a .ii input plus its autocomplete menu. Existing
+   tags are suggested as you type; a green "Create" row offers the new one. */
+.tag-combo{position:relative;display:inline-flex;flex-shrink:0}
+.tag-menu{position:absolute;z-index:60;top:calc(100% + 4px);left:0;min-width:100%;max-width:280px;
+  max-height:216px;overflow-y:auto;padding:4px;background:var(--modal-bg);
+  border:1px solid var(--border-strong);border-radius:10px;box-shadow:var(--shadow-float)}
+.tag-menu[hidden]{display:none}
+.tag-opt{display:flex;align-items:center;gap:8px;width:100%;padding:6px 8px;border:none;
+  background:transparent;color:var(--text2);cursor:pointer;border-radius:7px;text-align:left;
+  font-family:var(--mono);font-size:11px;white-space:nowrap}
+.tag-opt:hover,.tag-opt.active{background:var(--cyan-dim);color:var(--cyan)}
+.tag-opt-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.tag-opt-name mark{background:none;color:var(--cyan);font-weight:700}
+.tag-opt-count{font-size:9px;color:var(--muted2);flex-shrink:0}
+.tag-opt.create{color:var(--green)}
+.tag-opt.create:hover,.tag-opt.create.active{background:var(--green-dim);color:var(--green)}
+.tag-opt-hint{font-family:var(--mono);font-size:9px;color:var(--green);opacity:.8;
+  letter-spacing:.08em;text-transform:uppercase;flex-shrink:0}
+
+/* mashup ingredients: a row whose target is the "output" song it lands into */
+.ts-name .ts-mash{font-size:9px;padding:1px 7px;border-radius:100px;background:var(--green-dim);
+  color:var(--green);border:1px solid rgba(52,211,153,.4);flex-shrink:0;white-space:nowrap}
+.ts-mi{font-size:10px;color:var(--green);display:flex;align-items:center;gap:4px;margin-top:2px;
+  font-family:var(--mono);overflow:hidden}
+.ts-mi .ts-click{color:var(--green);cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ts-mi .ts-click:hover{color:var(--cyan)}
+.ts-mi-plain{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ts-mi .ts-notlib{margin-left:4px}
+
 /* transitions sidebar tab */
 .ts-tab-group{margin-bottom:14px}
 .ts-tab-src{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11.5px;
@@ -734,6 +793,11 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
 .tool-opt-name{font-size:12px;font-weight:500;color:var(--text);line-height:1.35}
 .tool-opt-desc{font-size:10.5px;color:var(--muted);margin-top:2px;line-height:1.45}
 .tool-hint{font-family:var(--mono);font-size:10.5px;color:var(--muted);line-height:1.55}
+/* Background genre backfill: progress bar + Start / Cancel controls */
+.bg-track{height:6px;background:var(--row-border);border-radius:100px;overflow:hidden;margin-top:10px}
+.bg-bar{height:100%;width:0;background:var(--cyan);border-radius:100px;transition:width .3s ease}
+.bg-bar.done{background:var(--green)}
+.bg-bar.err{background:var(--red)}
 .switch{position:relative;display:inline-block;width:42px;height:25px;flex-shrink:0}
 .switch input{position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;z-index:2;width:100%;height:100%}
 .switch-track{position:absolute;inset:0;background:var(--chip-2);
@@ -773,7 +837,7 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
 <body>
 
 <header>
-  <div class="logo">DJ <span>/</span> LIB</div>
+  <div class="logo">DJ <span>/</span> <span id="logoName">LIB</span></div>
   <div class="search-wrap">
     <span class="si">⌕</span>
     <input type="text" id="searchInput" placeholder="Search…" oninput="applyFilters()">
@@ -784,7 +848,6 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
     <option value="bpm">Sort: BPM</option>
     <option value="duration_seconds">Sort: Duration</option>
     <option value="file_size_bytes">Sort: File size</option>
-    <option value="play_count">Sort: Play count</option>
     <option value="added_at">Sort: Date added (newest first)</option>
   </select>
   <button class="pwa-install" id="transTryBtn" onclick="showTab('transitions')" style="display:none;margin-right:6px" title="Transitions marked “to try” — untested mixes awaiting a live check">🧪&nbsp;<span id="transTryCount">0</span> to try</button>
@@ -861,6 +924,63 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
       <button class="btn" onclick="startDownload()">GET</button>
     </div>
     <div class="sp hidden" id="dlStatus"><div class="dot"></div><span id="dlStatusText"></span></div>
+
+    <div class="sb-label" style="margin-top:16px">Import folder</div>
+    <div style="display:flex;gap:8px">
+      <input type="text" class="fi" id="importFolderPath"
+        placeholder="/Users/you/Downloads/some-folder"
+        onkeydown="if(event.key==='Enter')startFolderImport()">
+      <button class="btn-ghost" onclick="openFolderPicker()" style="flex-shrink:0;width:auto;margin:0"
+        title="Browse or search for a folder">🔍 Browse…</button>
+    </div>
+    <details class="import-opts">
+      <summary>Options — auto-crates, genre tags, duplicates, destination</summary>
+      <div class="tool-card" style="margin-top:8px">
+        <div class="tool-opt">
+          <div class="tool-opt-text">
+            <div class="tool-opt-name">Auto-create crates from subfolders</div>
+            <div class="tool-opt-desc">e.g. …/House/track.mp3 → crate "House" (created if missing)</div>
+          </div>
+          <label class="switch" title="Create a crate per subfolder">
+            <input type="checkbox" id="autoCrateCheckbox" onchange="toggleAutoCrateMode()">
+            <span class="switch-track"></span>
+          </label>
+        </div>
+        <div class="tool-opt">
+          <div class="tool-opt-text">
+            <div class="tool-opt-name">Auto-tag genre from subfolders</div>
+            <div class="tool-opt-desc">Writes the folder name into each file's genre tag</div>
+          </div>
+          <label class="switch" title="Write the folder name as the genre">
+            <input type="checkbox" id="autoGenreCheckbox">
+            <span class="switch-track"></span>
+          </label>
+        </div>
+        <div class="tool-opt">
+          <div class="tool-opt-text">
+            <div class="tool-opt-name">Import even if already owned</div>
+            <div class="tool-opt-desc">Skips duplicate checking — use the Merge tool afterward</div>
+          </div>
+          <label class="switch" title="Skip duplicate checking">
+            <input type="checkbox" id="forceDuplicatesCheckbox">
+            <span class="switch-track"></span>
+          </label>
+        </div>
+      </div>
+      <div style="margin-top:8px;display:flex;flex-direction:column;gap:8px">
+        <select class="rule-sel" id="importCrateSelect" style="width:100%">
+          <option value="">No crate — just add to library</option>
+        </select>
+        <input type="text" class="fi" id="importSubfolder" style="width:100%"
+          placeholder="Destination subfolder (optional)">
+      </div>
+    </details>
+    <button class="btn-ghost" onclick="startFolderImport()" id="importBtn" style="margin-top:10px">⇩ Import Folder</button>
+    <div class="sp hidden" id="importStatus" style="width:100%">
+      <div class="dot"></div><span id="importStatusText"></span>
+    </div>
+    <div class="tool-hint" style="margin-top:8px">Scans the folder for MP3/WAV/FLAC/M4A files, copies them into
+      your library (originals untouched), skips anything already owned.</div>
   </div>
 
   <!-- Sidebar navigation tabs -->
@@ -868,6 +988,7 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
     <button class="sb-tab active" onclick="showTab('library')">Library</button>
     <button class="sb-tab" onclick="showTab('crates')">Crates</button>
     <button class="sb-tab" onclick="showTab('transitions')">Transitions</button>
+    <button class="sb-tab" onclick="showTab('mashups')">Mashups</button>
     <button class="sb-tab" onclick="showTab('tools')">Tools</button>
     <button class="sb-tab" onclick="showTab('settings')">⚙ Settings</button>
   </div>
@@ -907,66 +1028,21 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
     <div class="nav-list" id="transitionList" style="padding:0 10px 16px"></div>
   </div>
 
+  <!-- MASHUPS TAB -->
+  <div class="sb-panel" id="tab-mashups">
+    <div style="padding:10px 14px">
+      <button class="btn-ghost" onclick="openAddMashupModal(null)">⇄ + Add Mashup</button>
+      <div class="tool-hint" style="margin-top:8px">Songs that ARE mashups: the mashup file is
+        the source, with the input song it blends in from and the output song it lands
+        into. Both can be library songs or names you type.</div>
+    </div>
+    <div class="nav-list" id="mashupList" style="padding:0 10px 16px"></div>
+  </div>
+
   <!-- TOOLS TAB -->
   <div class="sb-panel" id="tab-tools">
     <div style="padding:12px 14px 18px">
-      <div class="sb-label">Import folder</div>
-      <div style="display:flex;gap:8px">
-        <input type="text" class="fi" id="importFolderPath"
-          placeholder="/Users/you/Downloads/some-folder"
-          onkeydown="if(event.key==='Enter')startFolderImport()">
-        <button class="btn-ghost" onclick="openFolderPicker()" style="flex-shrink:0;width:auto"
-          title="Browse or search for a folder">🔍 Browse…</button>
-      </div>
-
-      <div class="tool-card" style="margin-top:12px">
-        <div class="tool-opt">
-          <div class="tool-opt-text">
-            <div class="tool-opt-name">Auto-create crates from subfolders</div>
-            <div class="tool-opt-desc">e.g. …/House/track.mp3 → crate "House" (created if missing)</div>
-          </div>
-          <label class="switch" title="Create a crate per subfolder">
-            <input type="checkbox" id="autoCrateCheckbox" onchange="toggleAutoCrateMode()">
-            <span class="switch-track"></span>
-          </label>
-        </div>
-        <div class="tool-opt">
-          <div class="tool-opt-text">
-            <div class="tool-opt-name">Auto-tag genre from subfolders</div>
-            <div class="tool-opt-desc">Writes the folder name into each file's genre tag</div>
-          </div>
-          <label class="switch" title="Write the folder name as the genre">
-            <input type="checkbox" id="autoGenreCheckbox">
-            <span class="switch-track"></span>
-          </label>
-        </div>
-        <div class="tool-opt">
-          <div class="tool-opt-text">
-            <div class="tool-opt-name">Import even if already owned</div>
-            <div class="tool-opt-desc">Skips duplicate checking — use the Merge tool afterward</div>
-          </div>
-          <label class="switch" title="Skip duplicate checking">
-            <input type="checkbox" id="forceDuplicatesCheckbox">
-            <span class="switch-track"></span>
-          </label>
-        </div>
-      </div>
-
-      <div style="margin-top:12px;display:flex;flex-direction:column;gap:8px">
-        <select class="rule-sel" id="importCrateSelect" style="width:100%">
-          <option value="">No crate — just add to library</option>
-        </select>
-        <input type="text" class="fi" id="importSubfolder" style="width:100%"
-          placeholder="Destination subfolder (optional)">
-        <button class="btn-ghost" onclick="startFolderImport()" id="importBtn">⇩ Import Folder</button>
-        <div class="sp hidden" id="importStatus" style="width:100%">
-          <div class="dot"></div><span id="importStatusText"></span>
-        </div>
-        <div class="tool-hint">Scans the folder for MP3/WAV/FLAC/M4A files, copies them into
-          your library (originals untouched), skips anything already owned.</div>
-      </div>
-
-      <div style="margin-top:18px">
+      <div style="margin-top:0">
         <div class="sb-label">Duplicates</div>
         <div class="dupe-count" id="dupeCount">—</div>
         <div class="dupe-sub">duplicate groups</div>
@@ -981,12 +1057,71 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
       </div>
 
       <div style="margin-top:18px">
-        <div class="sb-label">Rekordbox / Serato / DJUCED</div>
-        <button class="btn-ghost" onclick="exportRekordboxXml()">⬇ Export library (rekordbox.xml)</button>
-        <div class="tool-hint" id="rekordboxWhyHint">Exports your whole library — BPM, Camelot key,
-          crates and transition notes — as the standard rekordbox.xml that Rekordbox, Serato DJ Pro
-          and DJUCED (6.3+) all import (File → Import). Per-crate exports are on each crate in the
-          Crates tab.</div>
+        <div class="sb-label">Prepare a USB / export library</div>
+        <div class="tool-card" style="padding:12px">
+          <div class="sb-label" style="margin-top:0">1. Choose export mode</div>
+          <select class="rule-sel" id="usbModeSelect" style="width:100%" onchange="updateUsbExportHints()">
+            <option value="rekordbox">Pioneer / AlphaTheta — Rekordbox import (recommended for CDJ)</option>
+            <option value="engine">Denon / Engine OS — Engine DJ import</option>
+            <option value="files">Audio files only — no DJ desktop software</option>
+          </select>
+          <div class="tool-hint" id="usbModeHint" style="margin:6px 0 10px"></div>
+          <div id="usbWholeLibraryChoice" style="display:none;margin:-4px 0 10px">
+            <button type="button" class="btn-ghost" id="usbWholeLibraryBtn" aria-controls="usbScopeSelect"
+              onclick="selectUsbWholeLibrary()" style="width:auto;padding:5px 9px">Export entire library</button>
+            <span class="tool-hint" style="display:inline;margin-left:6px">All tracks, including crate members and uncrated songs.</span>
+          </div>
+
+          <div class="sb-label" id="usbScopeLabel">2. Choose what to export</div>
+          <select class="rule-sel" id="usbScopeSelect" style="width:100%" onchange="updateUsbExportHints()">
+            <option value="library">Entire library (each track once)</option>
+            <option value="crate">One crate</option>
+            <option value="selected_crates">Selected crates</option>
+            <option value="crates">All crates (import crate playlists)</option>
+          </select>
+          <select class="rule-sel" id="usbCrateSelect" style="width:100%;margin-top:7px;display:none">
+            <option value="">Choose a crate…</option>
+          </select>
+          <div id="usbCrateMultiSelect" style="display:none;margin-top:7px">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:5px">
+              <div id="usbCrateSelectionCount" class="tool-hint" style="margin:0">Choose one or more crates.</div>
+              <div style="display:flex;gap:5px">
+                <button class="btn-ghost" type="button" onclick="setUsbCrateSelection(true)" style="width:auto;padding:3px 7px;font-size:10px">Select all</button>
+                <button class="btn-ghost" type="button" onclick="setUsbCrateSelection(false)" style="width:auto;padding:3px 7px;font-size:10px">Clear</button>
+              </div>
+            </div>
+            <div id="usbCrateOptions" role="group" aria-label="Crates to export"
+              style="max-height:170px;overflow:auto;border:1px solid var(--border);border-radius:8px;background:var(--chip);padding:4px"></div>
+          </div>
+          <div id="usbLayoutWrap" style="display:none;margin-top:12px">
+            <div class="sb-label">3. Audio-only folder layout</div>
+            <div class="tool-hint" style="margin:-4px 0 6px">For the full library, crate-folder mode groups crate songs by crate and puts uncrated songs together in Crates/Uncrated.</div>
+            <select class="rule-sel" id="usbLayoutSelect" style="width:100%" onchange="updateUsbExportHints()">
+              <option value="library">Library folders — copy each track once</option>
+              <option value="crates">Crate folders — one folder per crate</option>
+            </select>
+            <div class="tool-hint" id="usbLayoutHint" style="margin-top:6px"></div>
+          </div>
+
+          <div class="sb-label" style="margin-top:12px">4. Mounted USB drive or SD card path</div>
+          <div style="display:flex;gap:7px">
+            <input class="fi" id="usbVolumeInput" style="flex:1;min-width:0"
+              aria-label="Mounted USB drive or SD card path"
+              placeholder="/Volumes/Drive name (or browse…)" oninput="invalidateUsbPlan()">
+            <button class="btn-ghost" onclick="openFolderPicker('usb')" style="flex-shrink:0;width:auto">Browse…</button>
+          </div>
+          <div class="tool-hint" id="usbPlanHint" style="margin:7px 0"></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn-ghost" id="usbPlanBtn" onclick="planUsbExport()">Check space & files</button>
+            <button class="btn-save" id="usbExportBtn" onclick="startUsbExport()" disabled>Prepare USB export</button>
+          </div>
+          <div id="usbExportStatus" class="tool-hint" style="display:none;white-space:pre-line;margin-top:8px"></div>
+        </div>
+        <div class="tool-hint" id="rekordboxWhyHint">Rekordbox and Engine DJ import crate playlists from XML; those playlists are not guaranteed to become physical audio folders. Native USB databases are prepared in the desktop app. Audio-only M3U8s are portable but not supported by every player; compatible CDJs can browse audio folders without a Rekordbox library, while playlists, search and performance features vary by model and firmware. Nothing formats or erases your drive.</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+          <button class="btn-ghost" onclick="refreshRekordboxLiveFile()">↻ Refresh live rekordbox.xml</button>
+          <button class="btn-ghost" onclick="exportRekordboxXml()">⬇ Download XML copy</button>
+        </div>
         <div class="tool-hint" id="rekordboxLiveHint" style="color:#8b949e"></div>
       </div>
 
@@ -999,9 +1134,44 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
       <div style="margin-top:18px">
         <div class="sb-label">Clean up metadata</div>
         <button class="btn-ghost" id="cleanupScanBtn" onclick="startMetadataCleanup()">✨ Match tracks on Spotify…</button>
+        <button class="btn-ghost" id="genreFillBtn" onclick="startGenreFill()"
+          title="Look up a genre (Discogs → MusicBrainz → Spotify) for every track that has none, then review each one before anything is written">♪ Fill missing genres…</button>
+        <div class="tool-hint" id="genreFillHint" style="margin-top:6px"></div>
+        <div class="tool-card" id="genreBackfillCard" style="margin-top:10px">
+          <div class="tool-opt" style="display:block">
+            <div class="tool-opt-text">
+              <div class="tool-opt-name">Background genre backfill</div>
+              <div class="tool-opt-desc" id="bgText">Look up every track that has no genre
+                (Discogs → MusicBrainz → Spotify), paced under Discogs' rate limit. Safe to
+                cancel or close the app — it resumes where it left off.</div>
+            </div>
+            <div class="bg-track"><div class="bg-bar" id="bgBar"></div></div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:9px">
+              <button class="btn-ghost" id="bgStart" onclick="startGenreBackfill()">▶ Start backfill</button>
+              <button class="btn-ghost" id="bgCancel" onclick="cancelGenreBackfill()"
+                style="display:none">■ Cancel</button>
+            </div>
+          </div>
+        </div>
         <div style="display:flex;align-items:center;gap:8px;margin-top:10px">
           <span style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--muted);text-transform:uppercase">Min confidence</span>
           <div class="sw-pills" style="margin:0" id="cleanupConfPills"></div>
+        </div>
+
+        <div class="sb-label" style="margin-top:18px">Genres &amp; tags</div>
+        <div class="tool-card" id="tagSeparationCard">
+          <div class="tool-opt" style="display:block">
+            <div class="tool-opt-text">
+              <div class="tool-opt-name">Separate tags from genres</div>
+              <div class="tool-opt-desc">A genre stays a genre — that is what Mixxx's Genre column,
+                the rekordbox import and your smart crates read. Tokens marked with “#”, and genres
+                carried by only one or two tracks, are usually tags: move one across and nothing else
+                about the track changes.</div>
+            </div>
+            <button class="btn-ghost" onclick="loadTagSeparation()" style="margin-top:9px">🔎 Find candidate tokens…</button>
+            <div class="tool-hint" id="tagSeparationHint" style="margin-top:6px"></div>
+            <div id="tagSeparationList" style="margin-top:8px"></div>
+          </div>
         </div>
         <div class="tool-card" style="margin-top:10px">
           <div class="tool-opt">
@@ -1018,6 +1188,29 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
           </div>
           <div class="tool-opt">
             <div class="tool-opt-text">
+              <div class="tool-opt-name">Auto-tag genres</div>
+              <div class="tool-opt-desc">On new downloads, fill in a missing genre from the best available source (Discogs, then MusicBrainz, then Spotify). Existing genres are left alone.</div>
+            </div>
+            <label class="switch" title="Fill missing genres from Discogs / MusicBrainz / Spotify on downloads">
+              <input type="checkbox" id="autoSpotifyGenreCheckbox" onchange="saveAutoSpotifyGenre(this)">
+              <span class="switch-track"></span>
+            </label>
+          </div>
+          <div class="tool-opt">
+            <div class="tool-opt-text">
+              <div class="tool-opt-name">Sweep genres after scans</div>
+              <div class="tool-opt-desc">After each library scan, run the background genre
+                fill automatically for every track still missing a genre — so new
+                downloads get tagged without pressing Start. Existing genres are left
+                alone, and the sweep can be Canceled like any other.</div>
+            </div>
+            <label class="switch" title="Auto-run the whole-library genre backfill after each scan">
+              <input type="checkbox" id="autoGenreBackfillCheckbox" onchange="saveAutoGenreBackfill(this)">
+              <span class="switch-track"></span>
+            </label>
+          </div>
+          <div class="tool-opt">
+            <div class="tool-opt-text">
               <div class="tool-opt-name">Only scan tracks never scanned</div>
               <div class="tool-opt-desc">Skips anything a previous cleanup already looked at —
                 scans get faster and your manual tag edits are never overwritten later</div>
@@ -1028,8 +1221,10 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
             </label>
           </div>
         </div>
-        <div class="tool-hint" id="cleanupHint">Matches tracks against Spotify and lets you
-          review every proposed Title / Artist / Album / Genre fix before anything is written.
+        <div class="tool-hint" id="cleanupHint">Matches tracks against Spotify and gives every
+          proposed fix its own <b style="color:var(--green)">Accept</b> / <b style="color:var(--red)">Reject</b>
+          buttons (plus an Edit form, and Accept-all / Reject-all for batches). Accepted and rejected
+          songs are remembered and never proposed twice.
           Needs Spotify connected.</div>
       </div>
     </div>
@@ -1038,7 +1233,16 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
   <!-- SETTINGS TAB -->
   <div class="sb-panel" id="tab-settings">
     <div style="padding:12px 14px 18px">
-      <div class="sb-label">Your DJ software</div>
+      <div class="sb-label">Library name</div>
+      <div style="display:flex;gap:8px">
+        <input type="text" class="fi" id="libraryNameInput" maxlength="60" spellcheck="false"
+          placeholder="DJ Library" onkeydown="if(event.key==='Enter')saveLibraryName()">
+        <button class="btn-save" onclick="saveLibraryName()" style="flex-shrink:0">Save</button>
+      </div>
+      <div class="tool-hint">Just a label — shown in the app header and the browser tab. Your files stay
+        exactly where they are, so Mixxx and its cues/history are never affected.</div>
+
+      <div class="sb-label" style="margin-top:16px">Your DJ software</div>
       <div class="sw-pills" id="swPills"></div>
       <div class="tool-hint" style="margin-top:8px">The app adapts its sync buttons, workflow hints
         and the intro guide to this choice. Pick one, or “Just organizing” if you only manage files here.</div>
@@ -1050,6 +1254,15 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
             <div class="tool-opt-desc" id="swGuideBody" style="white-space:pre-line;line-height:1.55"></div>
           </div>
         </div>
+      </div>
+
+      <div style="margin-top:18px">
+        <div class="sb-label">Music folder (where the tracks live)</div>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button class="btn-save" id="musicDirSetupBtn" onclick="startNewLibraryWizard()">📚 Set up library…</button>
+        </div>
+        <div class="tool-hint" id="musicDirHint">Move to a new folder, adopt a folder that already holds the
+          tracks, or start fresh somewhere else — crates and transition notes survive it all.</div>
       </div>
 
       <div style="margin-top:18px">
@@ -1069,12 +1282,6 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
       </div>
 
       <div class="tool-card" style="margin-top:14px">
-        <button class="btn-ghost mixxx-only" onclick="syncMixxxPlayCounts()" style="width:100%">↻ Import play counts from Mixxx</button>
-        <div class="tool-hint mixxx-only" style="margin-top:8px">Reads Mixxx’s play history without modifying its database. Automatic sync runs during library activity, at most once per minute, when Mixxx is closed.</div>
-        <label class="tool-opt mixxx-only" style="cursor:pointer">
-          <span class="tool-opt-text"><span class="tool-opt-name">Sync play counts during activity</span></span>
-          <input type="checkbox" id="autoSyncMixxxPlaysCheckbox" onchange="saveAutoSyncMixxxPlays()">
-        </label>
         <div class="tool-opt">
           <div class="tool-opt-text">
             <div class="tool-opt-name mixxx-only">Auto-add new songs to Mixxx</div>
@@ -1189,11 +1396,12 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
       <div id="batchNote" class="batch-note" style="display:none"></div>
       <div class="ig" id="infoGrid"></div>
       <div id="transitionsSection" style="margin-top:22px"></div>
+      <div id="cleanupSection" style="margin-top:22px"></div>
     </div>
     <div class="iacts">
-      <button class="btn-ghost" style="width:auto" id="infoFinderBtn"
+      <button class="btn-ghost" id="infoFinderBtn"
         onclick="revealInFinder(currentSong?.filepath)">Show in Finder</button>
-      <button class="btn-ghost" style="width:auto;color:var(--purple);border-color:rgba(191,90,242,.45)"
+      <button class="btn-ghost" style="color:var(--purple);border-color:rgba(191,90,242,.45)"
         onclick="addInfoSongsToCrate()">＋ Add to crate</button>
       <button class="btn-save" onclick="saveInfo()">Save to file</button>
     </div>
@@ -1284,10 +1492,26 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
 <div class="modal-bd" id="addTransitionModal">
   <div class="modal" style="width:460px">
     <div class="mhdr">
-      <div class="mtitle" style="color:var(--cyan)">⇄ Add Transition</div>
+      <div class="mtitle" style="color:var(--cyan)" id="addTransitionTitle">⇄ Add Transition</div>
       <button class="mclose" onclick="closeAddTransitionModal()">✕</button>
     </div>
     <div class="mbody" id="addTransitionBody"></div>
+  </div>
+</div>
+
+<!-- LIBRARY SONG SEARCH PICKER -- small reusable search-and-pick dialog -->
+<div class="modal-bd" id="songPickerModal">
+  <div class="modal" style="width:400px">
+    <div class="mhdr">
+      <div class="mtitle" style="color:var(--cyan)" id="songPickerTitle">Pick a song</div>
+      <button class="mclose" onclick="closeSongPicker()">✕</button>
+    </div>
+    <div class="mbody">
+      <input class="ii" id="songPickerSearch" placeholder="Search the library…"
+        style="width:100%;margin-bottom:8px" oninput="renderSongPickerList(this.value)">
+      <div class="nav-list" id="songPickerList" style="padding:0;max-height:280px;overflow-y:auto;
+        border:1px solid var(--border);border-radius:8px"></div>
+    </div>
   </div>
 </div>
 
@@ -1318,6 +1542,16 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
             <span class="switch-track"></span>
           </label>
         </div>
+        <div class="tool-opt">
+          <div class="tool-opt-text">
+            <div class="tool-opt-name">Auto-tag genres from Spotify</div>
+            <div class="tool-opt-desc">Fill only missing genres on new downloads. Existing tags are never replaced.</div>
+          </div>
+          <label class="switch" title="Fill missing genres from Spotify on downloads">
+            <input type="checkbox" id="introAutoSpotifyGenreCheckbox" onchange="saveAutoSpotifyGenre(this)">
+            <span class="switch-track"></span>
+          </label>
+        </div>
       </div>
     </div>
     <div class="iacts">
@@ -1342,9 +1576,56 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
       <div class="flist" id="folderEntries"></div>
     </div>
     <div class="iacts">
-      <div id="folderUsePath" style="flex:1;font-family:var(--mono);font-size:10px;color:var(--muted);word-break:break-all;text-align:left"></div>
+      <div id="folderUsePath" style="flex:1;font-family:var(--mono);font-size:10px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left" title=""></div>
       <button class="btn-ghost" onclick="closeFolderPicker()">Cancel</button>
       <button class="btn-save" id="folderUseBtn" onclick="usePickedFolder()">Use this folder</button>
+    </div>
+  </div>
+</div>
+
+<!-- NEW LIBRARY WIZARD -- three ways to (re)set up the library: move the
+     tracks to another folder, adopt a folder that already holds them, or
+     start a brand-new empty library elsewhere -->
+<div class="modal-bd" id="newLibModal">
+  <div class="modal modal-w">
+    <div class="mhdr">
+      <div class="mtitle" style="color:var(--green)">📚 Set up a library</div>
+      <button class="mclose" onclick="closeNewLibModal()">✕</button>
+    </div>
+    <div class="mbody">
+      <div class="sw-pills" style="margin-bottom:12px">
+        <button class="sw-pill" id="newLibModeMove" onclick="setNewLibMode('move')">↗ Move tracks to this folder</button>
+        <button class="sw-pill" id="newLibModeAdopt" onclick="setNewLibMode('adopt')">📂 Tracks are already in this folder — make it my library</button>
+        <button class="sw-pill" id="newLibModeCreate" onclick="setNewLibMode('fresh')">✚ Start an empty new library</button>
+      </div>
+      <div class="tool-hint" style="margin-bottom:10px" id="newLibModeHint">Move every track from the current library
+        folder into the one you pick — crates and transition notes survive.</div>
+      <div id="newLibFromRow">
+        <div class="sb-label">From (current library folder)</div>
+        <input type="text" class="fi" id="newLibFrom" style="width:100%" spellcheck="false" disabled>
+      </div>
+      <div id="newLibNameRow">
+        <div class="sb-label">Library name</div>
+        <input type="text" class="fi" id="newLibName" style="width:100%" placeholder="DJ Library"
+          spellcheck="false" oninput="updateNewLibPreview()">
+      </div>
+      <div class="sb-label" style="margin-top:12px" id="newLibLocLabel">Folder to move the tracks into</div>
+      <div style="display:flex;gap:8px">
+        <input type="text" class="fi" id="newLibParent" style="width:100%" placeholder="/Users/you/Music"
+          spellcheck="false" oninput="updateNewLibPreview()">
+        <button class="btn-ghost" onclick="openFolderPicker('newlib')" style="flex-shrink:0;width:auto"
+          title="Pick a folder">🔍 Browse…</button>
+      </div>
+      <label class="tool-opt" id="newLibDeleteRow" style="cursor:pointer;margin-top:10px">
+        <span class="tool-opt-text"><span class="tool-opt-name">Delete the old (empty) folder afterwards</span></span>
+        <input type="checkbox" id="newLibDeleteOld">
+      </label>
+      <div class="tool-hint" id="newLibPeek" style="margin-top:8px"></div>
+      <div class="tool-hint" id="newLibPreview" style="margin-top:10px;font-family:var(--mono)"></div>
+    </div>
+    <div class="iacts">
+      <button class="btn-ghost" onclick="closeNewLibModal()">Cancel</button>
+      <button class="btn-save" id="newLibGo" onclick="confirmNewLibrary()">Move the tracks</button>
     </div>
   </div>
 </div>
@@ -1380,7 +1661,7 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
       <div id="mergePickList" style="max-height:380px;overflow-y:auto"></div>
     </div>
     <div class="iacts">
-      <button class="btn-ghost" style="width:auto" onclick="closeMergePicker()">Cancel</button>
+      <button class="btn-ghost" onclick="closeMergePicker()">Cancel</button>
       <button class="btn-save" id="mergePickGo" style="background:var(--green)"
         onclick="goMergePicker()" disabled>Merge selected (need 2)</button>
     </div>
@@ -1396,7 +1677,7 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
     </div>
     <div class="mbody" id="mergeModalBody">Loading…</div>
     <div class="iacts">
-      <button class="btn-ghost" style="width:auto" onclick="closeMergeModal()">Cancel</button>
+      <button class="btn-ghost" onclick="closeMergeModal()">Cancel</button>
       <button class="btn-save" style="background:var(--green)" onclick="confirmMerge()">Confirm Merge</button>
     </div>
   </div>
@@ -1422,18 +1703,19 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
 <!-- TOAST -- small acknowledgment that fades on its own -->
 <div class="toast" id="toast"><div class="dot"></div><span id="toastText"></span></div>
 
-<!-- METADATA CLEANUP MODAL -- review proposed Spotify tag fixes before applying -->
+<!-- METADATA CLEANUP MODAL -- review proposed Spotify tag fixes one-by-one (merge-panel style buttons) -->
 <div class="modal-bd" id="cleanupModal">
   <div class="modal modal-w">
     <div class="mhdr">
-      <div class="mtitle" style="color:var(--green)">✨ Clean up metadata</div>
+      <div class="mtitle" id="cleanupModalTitle" style="color:var(--green)">✨ Clean up metadata</div>
       <button class="mclose" onclick="closeMetadataCleanup()">✕</button>
     </div>
     <div class="mbody" id="cleanupModalBody">Loading…</div>
     <div class="iacts">
-      <span id="cleanupApplyStatus" style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-right:auto"></span>
-      <button class="btn-ghost" style="width:auto" onclick="closeMetadataCleanup()">Cancel</button>
-      <button class="btn-save" style="background:var(--green)" id="cleanupApplyBtn" onclick="applyMetadataCleanup()">Apply selected</button>
+      <span id="cleanupApplyStatus" style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-left:auto;margin-right:8px"></span>
+      <button class="btn-ghost" onclick="closeMetadataCleanup()">Cancel</button>
+      <button class="btn-ghost" style="color:var(--red);border-color:rgba(248,81,73,.45)" id="cleanupRejectBtn" onclick="rejectAllCleanup()">Reject all</button>
+      <button class="btn-save" style="background:var(--green)" id="cleanupApplyBtn" onclick="acceptAllCleanup()">Accept all</button>
     </div>
   </div>
 </div>
@@ -1454,6 +1736,8 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
   <button class="pb-btn pb-close" onclick="stopPreview()" title="Stop and hide">✕</button>
 </div>
 
+<script src="/static/tag-utils.js"></script>
+<script src="/static/usb-export.js"></script>
 <script>
 // MUSIC_DIR is overwritten from /api/config at startup (config.json is the
 // single source of truth) -- the value below is only a fallback if that fetch fails.
@@ -1590,10 +1874,8 @@ const COLUMN_CONFIG = {
   musical_key:       { label: 'Key',   width: '64px' },
   duration_seconds:  { label: 'Dur',   width: '60px' },
   file_size_bytes:   { label: 'Size',  width: '56px' },
-  play_count:        { label: 'Plays', width: '56px' },
-  least_played:      { label: 'Least played', width: '80px' },
 };
-const DEFAULT_COLUMN_ORDER = ['title','genre','bpm','musical_key','duration_seconds','file_size_bytes','play_count'];
+const DEFAULT_COLUMN_ORDER = ['title','genre','bpm','musical_key','duration_seconds','file_size_bytes'];
 let columnOrder = loadColumnOrder();
 let dragColKey = null;
 
@@ -1827,6 +2109,7 @@ async function init() {
     const cfgResp = await fetch('/api/config');
     const cfg = await cfgResp.json();
     if (cfg && cfg.music_dir) MUSIC_DIR = cfg.music_dir;
+    applyLibraryName((cfg && cfg.library_name) || '');
     if (cfg && cfg.rekordbox_export_path) {
       const hint = document.getElementById('rekordboxLiveHint');
       if (hint) hint.textContent = '🔄 Live file (auto-updated on every change): ' + cfg.rekordbox_export_path;
@@ -1834,16 +2117,23 @@ async function init() {
     }
     window.djsSoftware = (cfg && cfg.djs_software) || '';
     window.autoSyncMixxx = !cfg || cfg.auto_sync_mixxx !== false;
-    window.autoSyncMixxxPlays = !cfg || cfg.auto_sync_mixxx_plays !== false;
     window.keyDisplay = (cfg && cfg.key_display) || 'camelot';
     window.autoInstallPython = !cfg || cfg.auto_install_python !== false;   // still honoured by install.command's installer
     window.autoCleanupMetadata = !!(cfg && cfg.auto_cleanup_metadata);   // off by default
+    window.autoSpotifyGenre = !!(cfg && cfg.auto_spotify_genre);   // off by default
+    window.autoGenreBackfill = !!(cfg && cfg.auto_genre_backfill);   // off by default
+    window.musicDirChanging = !!(cfg && cfg.music_dir_changing);
+    if (window.musicDirChanging) pollMusicDirSwitch();   // switch was running when the app (re)loaded
     const autoCleanupToggle = document.getElementById('autoCleanupCheckbox');
     if (autoCleanupToggle) autoCleanupToggle.checked = window.autoCleanupMetadata;
+    const autoSpotifyGenreToggle = document.getElementById('autoSpotifyGenreCheckbox');
+    if (autoSpotifyGenreToggle) autoSpotifyGenreToggle.checked = window.autoSpotifyGenre;
+    const autoGenreBackfillToggle = document.getElementById('autoGenreBackfillCheckbox');
+    if (autoGenreBackfillToggle) autoGenreBackfillToggle.checked = window.autoGenreBackfill;
+    const introSpotifyGenreToggle = document.getElementById('introAutoSpotifyGenreCheckbox');
+    if (introSpotifyGenreToggle) introSpotifyGenreToggle.checked = window.autoSpotifyGenre;
     const toggle = document.getElementById('autoSyncMixxxCheckbox');
     if (toggle) toggle.checked = window.autoSyncMixxx;
-    const playToggle = document.getElementById('autoSyncMixxxPlaysCheckbox');
-    if (playToggle) playToggle.checked = window.autoSyncMixxxPlays;
     applySoftwareUI();
     applyKeyDisplayUI();
   } catch(e) { console.error('Failed to load config:', e); }
@@ -1854,6 +2144,8 @@ async function init() {
   await loadCrates();
   await checkDuplicates();
   await loadGenreSuggestions();
+  await loadTagSuggestions();
+  refreshGenreBackfill();
   refreshTransTryBadge();
   // First-run onboarding: show the intro until a software is picked (or the
   // user dismisses it once in this browser).
@@ -1894,17 +2186,86 @@ async function loadGenreSuggestions() {
   });
 }
 
+// Tags have their own autocomplete: the genre list above never seeds it, so a
+// tag can never masquerade as a genre (or the other way round).
+async function loadTagSuggestions() {
+  let tags = [];
+  try{ tags = await (await fetch('/api/tags')).json(); }catch(e){ tags = []; }
+  let dl = document.getElementById('tagEditList');
+  if(!dl){ dl=document.createElement('datalist'); dl.id='tagEditList'; document.body.appendChild(dl); }
+  dl.innerHTML = (Array.isArray(tags)?tags:[]).map(t=>`<option value="${esc(t.name)}">`).join('');
+}
+
+// ── TAGS vs GENRES REVIEW ────────────────────────────────────────────────────
+// Which genre tokens are really tags: anything still carrying the '#' marker,
+// plus tokens carried by one or two tracks. Nothing moves until a button is
+// pressed, and moving a token never changes anything else about a track.
+async function loadTagSeparation(){
+  const list=document.getElementById('tagSeparationList');
+  const hint=document.getElementById('tagSeparationHint');
+  if(!list) return;
+  list.innerHTML=`<div class="ts-empty">Looking…</div>`;
+  let data={candidates:[]};
+  try{ data=await (await fetch('/api/tag-separation')).json(); }catch(e){}
+  window._tagSeparation=data.candidates||[];
+  renderTagSeparation();
+}
+
+function renderTagSeparation(){
+  const list=document.getElementById('tagSeparationList');
+  const hint=document.getElementById('tagSeparationHint');
+  if(!list) return;
+  const candidates=window._tagSeparation||[];
+  if(!candidates.length){
+    list.innerHTML='';
+    if(hint) hint.textContent='Nothing to separate — every genre in the library is a genre ✨';
+    return;
+  }
+  if(hint) hint.textContent =
+    `${candidates.length} token${candidates.length===1?'':'s'} worth a look. “#” marks a token ` +
+    `the app already treats as a tag; rare genres are only suggestions.`;
+  list.innerHTML=candidates.map((c,i)=>`
+    <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--row-border)">
+      <div style="flex:1;min-width:0">
+        <div style="font-family:var(--mono);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c.token)}</div>
+        <div style="font-size:10px;color:var(--muted)">on ${c.count} track${c.count===1?'':'s'}${c.marked?' · marked with #':''}</div>
+      </div>
+      <button class="btn-ghost" style="width:auto;flex-shrink:0" onclick="applyTagSeparation(${i},'tag')"
+        title="Store this token in the tag tables and take it out of the genre field">Move to tags</button>
+      <button class="btn-ghost" style="width:auto;flex-shrink:0" onclick="applyTagSeparation(${i},'genre')"
+        title="Keep this token as a genre">Keep as genre</button>
+    </div>`).join('');
+}
+
+async function applyTagSeparation(index, action){
+  const candidate=(window._tagSeparation||[])[index];
+  if(!candidate) return;
+  const resp=await fetch('/api/tag-separation',{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({token:candidate.token, action})});
+  const data=await resp.json().catch(()=>({}));
+  if(!resp.ok || data.error){ toast(data.error || 'Could not move that token'); return; }
+  toast(action==='tag'
+    ? `“${candidate.token}” is now a tag on ${data.songs} track${data.songs===1?'':'s'}`
+    : `“${candidate.token}” stays a genre`);
+  await loadTagSeparation();
+  await loadGenreSuggestions();
+  await loadTagSuggestions();
+  await loadSongs(currentCrate);
+}
+
 // ── TABS ──────────────────────────────────────────────────────────────────────
 function showTab(name) {
   document.querySelectorAll('.sb-tab').forEach((t,i)=>{
-    const tabs=['library','crates','transitions','tools','settings'];
+    const tabs=['library','crates','transitions','mashups','tools','settings'];
     t.classList.toggle('active', tabs[i]===name);
   });
   document.querySelectorAll('.sb-panel').forEach(p=>p.classList.remove('active'));
   document.getElementById(`tab-${name}`).classList.add('active');
   // Fresh data whenever the Transitions tab becomes visible
   if(name==='transitions') renderTransitionTab();
-  if(name==='tools') updateCleanupHint();
+  if(name==='mashups') renderMashupsTab();
+  if(name==='tools'){ updateCleanupHint(); refreshGenreBackfill(); }
 }
 
 // ── DJ SOFTWARE & SETTINGS ───────────────────────────────────────────────────
@@ -1914,7 +2275,7 @@ function showTab(name) {
 const SOFTWARE = {
   mixxx:   {label:'Mixxx',
     workflow:'Mixxx watches your music folder itself — the same folder this app scans — so your songs are already there when you open it. Transition notes sync into Mixxx comments automatically as you add or edit them, and new songs are pushed into Mixxx automatically (toggle in Settings).',
-    steps:'1. Add songs: download them here, drop files in your music folder, or use Import Folder.\n2. Open Mixxx — it scans the same folder and sees everything.\n3. Cues, loops and waveforms are still yours to set in Mixxx.\n4. Optional: Crates tab → ⇄ on a crate pushes it into Mixxx as a crate.'},
+    steps:'1. Add songs: download them here (or use Import Folder, top left), drop files in your music folder.\n2. Open Mixxx — it scans the same folder and sees everything.\n3. Cues, loops and waveforms are still yours to set in Mixxx.\n4. Optional: Crates tab → ⇄ on a crate pushes it into Mixxx as a crate.'},
   rekordbox:{label:'Rekordbox',
     workflow:'Rekordbox can’t watch a folder, so the bridge is the always-current rekordbox.xml this app writes after every change. Import it once, then enable Rekordbox’s Bridge for automatic refreshes.',
     steps:'1. Settings → pick an export path (a synced folder works — see the note below).\n2. Rekordbox → File → Import → choose the rekordbox.xml. Tracks, BPM, Camelot keys, crates and transition notes land immediately.\n3. For automatic updates: Rekordbox → File → Preferences → Bridge → Imported Library → point it at the same file. It refreshes whenever the file changes.\n4. Keep adding songs here — the file stays fresh and Bridge picks it up.'},
@@ -1929,7 +2290,7 @@ const SOFTWARE = {
     steps:'1. Settings → pick an export path.\n2. Engine DJ → Library → Import → rekordbox.xml.\n3. Tracks, BPM, keys, playlists and notes land in your library.\n4. Re-import after big additions.'},
   none:    {label:'Just organizing',
     workflow:'No DJ-software syncing — DJ Library is your library manager. Downloads, tag editing, BPM/key analysis, crates and transition planning all work as-is.',
-    steps:'1. Add songs: download them here, drop files in your music folder, or use Import Folder.\n2. Use crates to organize and transitions to plan mixes.\n3. Pick a DJ app in Settings later if you want to move your library into one — the export is ready whenever you are.'}
+    steps:'1. Add songs: download them here (or use Import Folder, top left), drop files in your music folder.\n2. Use crates to organize and transitions to plan mixes.\n3. Pick a DJ app in Settings later if you want to move your library into one — the export is ready whenever you are.'}
 };
 
 function softwarePillHtml(sw){
@@ -1994,13 +2355,249 @@ async function saveExportPath(){
   }catch(e){ alert('Save failed: '+e.message); }
 }
 
-async function saveAutoSyncMixxxPlays(){
-  const on=document.getElementById('autoSyncMixxxPlaysCheckbox').checked;
-  window.autoSyncMixxxPlays=on;
+// ── LIBRARY NAME (display only) ─────────────────────────────────────────────
+// A purely cosmetic label: shown in the app header and the browser tab.
+// Files never move, so DJ software watching the same folder is unaffected.
+function applyLibraryName(name){
+  window.libraryName = (name||'').trim().slice(0,60);
+  const logo=document.getElementById('logoName');
+  if(logo) logo.textContent = window.libraryName || 'LIB';
+  document.title = window.libraryName ? window.libraryName+' — DJ Library' : 'DJ Library';
+  const input=document.getElementById('libraryNameInput');
+  if(input && document.activeElement!==input) input.value=window.libraryName;
+}
+
+async function saveLibraryName(){
+  const input=document.getElementById('libraryNameInput');
+  const name=(input.value||'').trim().slice(0,60);
   try{
-    await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({auto_sync_mixxx_plays:on})});
-  }catch(e){ console.error('Failed to save play-count sync:',e); }
+    const resp=await fetch('/api/config',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({library_name:name})});
+    const data=await resp.json();
+    if(data.error){ alert('Save failed: '+data.error); return; }
+    applyLibraryName(data.library_name);
+  }catch(e){ alert('Save failed: '+e.message); }
+}
+
+// ── MUSIC FOLDER SWITCH ───────────────────────────────────────────────────────
+// Relocates the library: 'move' takes the tracks to a new folder, 'adopt'
+// re-points the library at a folder that already holds the tracks, 'create'
+// makes a fresh folder first (a brand-new library location). The backend does
+// the file move + database path rewrite in a background job so crates, play
+// counts and transition notes all survive the trip.
+let musicDirPoll = null;
+
+function setMusicDirButtons(enabled){
+  const b=document.getElementById('musicDirSetupBtn');
+  if(b) b.disabled=!enabled;
+}
+
+// ── NEW LIBRARY WIZARD ────────────────────────────────────────────────────────
+// Three ways to (re)set up the library: 'move' takes the tracks from the
+// current library folder to a new one (backend creates it first, and can
+// delete the emptied old folder), 'adopt' re-points the library at a folder
+// that already holds the tracks, and 'fresh' creates <location>/<name> and
+// starts empty. The folder the app ends up with is <location>/<name> (or
+// <location> itself when the name is hidden or already its last segment).
+let newLibMode = 'move';
+
+function startNewLibraryWizard(){
+  const parent=document.getElementById('newLibParent');
+  const cur = (typeof MUSIC_DIR==='string' && MUSIC_DIR) ? MUSIC_DIR : (window.MUSIC_DIR||'');
+  parent.value = cur ? (cur.replace(/\/[^/]*\/?$/,'') || '/') : '';
+  document.getElementById('newLibName').value='';
+  document.getElementById('newLibDeleteOld').checked=false;
+  document.getElementById('newLibFrom').value=cur;
+  setNewLibMode('move');
+  document.getElementById('newLibModal').classList.add('open');
+  setTimeout(()=>document.getElementById('newLibParent').focus(),50);
+}
+
+function setNewLibMode(mode){
+  newLibMode = mode;
+  const create=document.getElementById('newLibModeCreate');
+  const adopt=document.getElementById('newLibModeAdopt');
+  const move=document.getElementById('newLibModeMove');
+  const hint=document.getElementById('newLibModeHint');
+  move.classList.toggle('active', mode==='move');
+  adopt.classList.toggle('active', mode==='adopt');
+  create.classList.toggle('active', mode==='fresh');
+  if(mode==='move'){
+    hint.textContent="Move every track from the current library folder into the one you pick — crates and transition notes survive.";
+    document.getElementById('newLibFromRow').style.display='';
+    document.getElementById('newLibNameRow').style.display='none';
+    document.getElementById('newLibDeleteRow').style.display='';
+    document.getElementById('newLibLocLabel').textContent='Folder to move the tracks into';
+    document.getElementById('newLibGo').textContent='Move the tracks';
+  }else if(mode==='adopt'){
+    hint.textContent="Nothing is moved — the folder you point at becomes the library, with every track, crate and transition note re-linked to it.";
+    document.getElementById('newLibFromRow').style.display='none';
+    document.getElementById('newLibNameRow').style.display='none';
+    document.getElementById('newLibDeleteRow').style.display='none';
+    document.getElementById('newLibLocLabel').textContent='Folder that holds the tracks';
+    document.getElementById('newLibGo').textContent='Make this my library';
+  }else{   // fresh
+    hint.textContent="A new folder is created and starts empty — your current tracks stay untouched where they are.";
+    document.getElementById('newLibFromRow').style.display='none';
+    document.getElementById('newLibNameRow').style.display='';
+    document.getElementById('newLibDeleteRow').style.display='none';
+    document.getElementById('newLibLocLabel').textContent='Location (parent folder)';
+    document.getElementById('newLibGo').textContent='Create library';
+  }
+  document.getElementById('newLibPeek').textContent='';
+  const go=document.getElementById('newLibGo');
+  go.disabled=false;
+  go.title='';
+  updateNewLibPreview();
+  if(mode==='move' || mode==='adopt') peekNewLib(newLibFullPath());
+}
+
+function closeNewLibModal(){
+  document.getElementById('newLibModal').classList.remove('open');
+}
+
+function newLibFullPath(){
+  let parent=(document.getElementById('newLibParent').value||'').trim();
+  if(!parent) return null;
+  parent=parent.replace(/\/$/,'');
+  if(newLibMode==='adopt') return parent;
+  if(newLibMode==='move') return parent;
+  const name=(document.getElementById('newLibName').value||'').trim();
+  if(!name) return parent;
+  // Don't double up when the chosen location already ends with the name
+  // (e.g. location picked via Browse was .../Music/Techno and name is Techno).
+  if(parent.split('/').pop().toLowerCase()===name.toLowerCase()) return parent;
+  return parent+'/'+name;
+}
+
+function updateNewLibPreview(){
+  const p=newLibFullPath();
+  document.getElementById('newLibPreview').textContent = p ? ('→ '+p) : 'Pick a location above.';
+}
+
+// Peek into the chosen folder so the wizard can warn before anything changes:
+// adopting an empty folder is refused, and moving into a folder that already
+// has audio in it deserves a heads-up too.
+let newLibPeekToken = 0;
+async function peekNewLib(p){
+  const el=document.getElementById('newLibPeek');
+  const go=document.getElementById('newLibGo');
+  if(!p){ el.textContent=''; return; }
+  const token=++newLibPeekToken;
+  el.textContent='Checking that folder…';
+  go.disabled=false;
+  go.title='';
+  let data;
+  try{
+    const resp=await fetch('/api/folders/peek?path='+encodeURIComponent(p));
+    data=await resp.json();
+  }catch(e){ data={error:e.message}; }
+  if(token!==newLibPeekToken || newLibMode==='fresh') return;   // stale or mode changed
+  if(data.error){
+    el.textContent = newLibMode==='move'
+      ? 'The folder does not exist yet — it will be created.'
+      : 'Could not check that folder: '+data.error;
+    return;
+  }
+  if(data.path && data.path.replace(/\/$/,'')===((typeof MUSIC_DIR==='string' && MUSIC_DIR)||'').replace(/\/$/,'')
+     && newLibMode!=='fresh'){
+    el.textContent='That is already the library folder. Pick a different one.';
+    go.disabled=true;
+    return;
+  }
+  if(data.empty){
+    if(newLibMode==='adopt'){
+      el.textContent='That folder is empty — there are no tracks in it to make a library from.';
+      go.disabled=true;
+      go.title='That folder has no audio files in it';
+    }else{
+      el.textContent='That folder is empty — there are no tracks in it yet.';
+    }
+  }else{
+    const n=data.audio_files;
+    el.textContent=`Found ${n} audio file${n===1?'':'s'} there${newLibMode==='move'?' — they stay as they are; only your library tracks are moved in.':''}.`;
+  }
+}
+
+async function confirmNewLibrary(){
+  let p=newLibFullPath();
+  if(!p){
+    alert(newLibMode==='adopt' ? 'Choose the folder that holds the tracks first.'
+      : newLibMode==='move' ? 'Choose the folder to move the tracks into first.'
+      : 'Choose a location for the new library first.');
+    return;
+  }
+  const go=document.getElementById('newLibGo');
+  go.disabled=true;
+  try{
+    const create = newLibMode!=='adopt';
+    // 'fresh' creates the folder before the switch (so a bad path fails
+    // before anything changes); for 'move' the backend creates the folder.
+    if(newLibMode==='fresh'){
+      const cr=await fetch('/api/folders/create',{method:'POST',
+        headers:{'Content-Type':'application/json'},body:JSON.stringify({folder:p})});
+      const cd=await cr.json();
+      if(cd.error){ alert('Could not create folder: '+cd.error); go.disabled=false; return; }
+      p=cd.path;
+    }
+    // …then switch to it: 'move' = relocate the files, 'adopt' = re-point,
+    // 'fresh' = empty start.
+    const body={folder:p,mode:newLibMode,create};
+    if(newLibMode==='move'){
+      const cb=document.getElementById('newLibDeleteOld');
+      body.delete_old=!!(cb&&cb.checked);
+    }
+    const resp=await fetch('/api/library/folder',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const data=await resp.json();
+    if(data.error){ alert('Switch failed: '+data.error); go.disabled=false; return; }
+    closeNewLibModal();
+    MUSIC_DIR = data.music_dir;          // keep the in-page catalog paths current
+    window.MUSIC_DIR = data.music_dir;   // (legacy mirror other code may read)
+    setMusicDirButtons(false);
+    pollMusicDirSwitch();
+  }catch(e){
+    alert('Failed: '+e.message);
+    go.disabled=false;
+  }
+}
+
+function pollMusicDirSwitch(){
+  clearInterval(musicDirPoll);
+  let ticks=0;
+  const tick=async()=>{
+    let st;
+    try{ st=await fetch('/api/library/switch-status/music-dir-switch').then(r=>r.json()); }
+    catch(e){ return; }
+    ticks++;
+    const hint=document.getElementById('musicDirHint');
+    if(st.status==='unknown' && ticks>20){
+      // The server was restarted mid-switch and the job state is gone. Give up
+      // polling (the switch may or may not have finished) and let the user act.
+      clearInterval(musicDirPoll);
+      window.musicDirChanging=false;
+      if(hint) hint.textContent='The app was restarted during a folder switch — check both folders, then run the switch again if tracks are still in the old one.';
+      setMusicDirButtons(true);
+      return;
+    }
+    if(st.status==='moving'||st.status==='importing'){
+      if(hint) hint.textContent=`Switching music folder… ${st.done||0}${st.total?` / ${st.total}`:''} files moved`;
+    }else if(st.status==='success'){
+      clearInterval(musicDirPoll);
+      window.musicDirChanging=false;
+      if(hint) hint.textContent='✓ Library folder switched. Crates and transition notes kept.';
+      setMusicDirButtons(true);
+      await loadSongs(currentCrate);
+      await loadCrates();
+    }else if(st.status==='failed'){
+      clearInterval(musicDirPoll);
+      window.musicDirChanging=false;
+      if(hint) hint.textContent='⚠ Switch failed: '+(st.failed||'unknown error')+' — the app still points at the new folder; fix the problem and switch again (or switch back).';
+      setMusicDirButtons(true);
+    }
+  };
+  tick();
+  musicDirPoll=setInterval(tick,1500);
 }
 
 async function saveAutoSyncMixxx(){
@@ -2010,6 +2607,29 @@ async function saveAutoSyncMixxx(){
     await fetch('/api/config',{method:'POST',
       headers:{'Content-Type':'application/json'},body:JSON.stringify({auto_sync_mixxx:on})});
   }catch(e){ console.error('Save auto-sync failed:',e); }
+}
+
+async function saveAutoSpotifyGenre(el){
+  const on = el ? el.checked : document.getElementById('autoSpotifyGenreCheckbox').checked;
+  window.autoSpotifyGenre=on;
+  const other = document.getElementById(el && el.id==='autoSpotifyGenreCheckbox'
+    ? 'introAutoSpotifyGenreCheckbox' : 'autoSpotifyGenreCheckbox');
+  if(other) other.checked=on;
+  try{
+    const response=await fetch('/api/config',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({auto_spotify_genre:on})});
+    if(!response.ok) throw new Error(`HTTP ${response.status}`);
+  }catch(e){ console.error('Save auto Spotify genre failed:',e); }
+}
+
+async function saveAutoGenreBackfill(el){
+  const on = el ? el.checked : document.getElementById('autoGenreBackfillCheckbox').checked;
+  window.autoGenreBackfill=on;
+  try{
+    const response=await fetch('/api/config',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({auto_genre_backfill:on})});
+    if(!response.ok) throw new Error(`HTTP ${response.status}`);
+  }catch(e){ console.error('Save auto genre backfill failed:',e); }
 }
 
 async function saveAutoCleanupMetadata(el){
@@ -2031,6 +2651,8 @@ function openIntroGuide(){
   if(steps) steps.textContent=(SOFTWARE[window.djsSoftware]||SOFTWARE.none).steps;
   const introToggle=document.getElementById('introAutoCleanupCheckbox');
   if(introToggle) introToggle.checked=!!window.autoCleanupMetadata;
+  const introGenreToggle=document.getElementById('introAutoSpotifyGenreCheckbox');
+  if(introGenreToggle) introGenreToggle.checked=!!window.autoSpotifyGenre;
   document.getElementById('introModal').classList.add('open');
 }
 
@@ -2203,6 +2825,7 @@ async function loadCrates() {
   }
   populateImportCrateSelect();
   populateDownloadCrateSelect();
+  populateUsbCrates();
 }
 
 // Keep the folder-import crate dropdown in sync with the crate list
@@ -2305,29 +2928,65 @@ async function startFolderImport() {
 // ── FOLDER PICKER ─────────────────────────────────────────────────────────────
 // Finder-style browse + search for the Import Folder tool. All filesystem
 // access happens on the backend; this only renders what /api/folders returns.
-let folderPick = { path: null };
-let folderPickTarget = 'import';   // where the picked folder goes: 'import' | 'export' | 'download'
+let folderPick = { path: null };  let folderPickTarget = 'import';   // where the picked folder goes: 'import' | 'export' | 'download' | 'newlib' | 'usb'
 let folderSearchTimer = null;
+let folderBrowseRequest = 0;
+let folderSearchRequest = 0;
 
-function openFolderPicker(target){
-  folderPickTarget = target || 'import';
-  const m = document.getElementById('folderPickerModal');
+async function openFolderPicker(target){
+  const pickerTarget=target||'import';
+  folderPickTarget=pickerTarget;
+  folderPick.path=null;
+  folderSearchRequest++;
+  const m=document.getElementById('folderPickerModal');
+  const requestId=++folderBrowseRequest;
   m.classList.add('open');
-  document.getElementById('folderSearchInput').value = '';
-  browseFolder('');   // home
+  document.getElementById('folderSearchInput').value='';
+  const searchInput=document.getElementById('folderSearchInput');
+  searchInput.disabled=pickerTarget==='usb';
+  if(pickerTarget==='usb'){
+    document.getElementById('folderRoots').innerHTML='';
+    document.getElementById('folderEntries').innerHTML='<div class="fempty">Finding writable USB drives and SD cards…</div>';
+    document.getElementById('folderUseBtn').disabled=true;
+    await loadUsbPickerVolumes();
+  }
+  if(requestId!==folderBrowseRequest||folderPickTarget!==pickerTarget||!m.classList.contains('open')) return;
+  searchInput.disabled=false;
+  await browseFolder(pickerTarget==='usb'?'/Volumes':'');
 }
 
 function closeFolderPicker(){
+  folderBrowseRequest++;
+  folderSearchRequest++;
+  document.getElementById('folderSearchInput').disabled=false;
+  if(folderPickTarget==='usb') window.usbPickerVolumeRequest++;
   document.getElementById('folderPickerModal').classList.remove('open');
 }
 
 async function browseFolder(path){
+  folderSearchRequest++;
+  const requestId=++folderBrowseRequest;
+  if(folderPickTarget==='usb'){
+    folderPick.path=null;
+    updateUsbPickerSelection(null);
+    if(path!=='/Volumes'&&!window.usbPickerVolumePaths.has(path)){
+      document.getElementById('folderUsePath').textContent='';
+      document.getElementById('folderUseBtn').disabled=true;
+      document.getElementById('folderEntries').innerHTML='<div class="fempty">Choose an eligible mounted export volume.</div>';
+      return;
+    }
+  }
   const resp = await fetch('/api/folders/browse?path='+encodeURIComponent(path));
   const data = await resp.json();
+  if(requestId!==folderBrowseRequest) return;
   const list = document.getElementById('folderEntries');
   const crumb = document.getElementById('folderCrumb');
   document.getElementById('folderUsePath').textContent = '';
+  document.getElementById('folderUsePath').title = '';
+  if(folderPickTarget==='usb') document.getElementById('folderUseBtn').disabled=true;
   if(data.error){
+    folderPick.path=null;
+    if(folderPickTarget==='usb') updateUsbPickerSelection(null);
     list.innerHTML = `<div class="fempty">${esc(data.error)}</div>`;
     crumb.innerHTML = '';
     document.getElementById('folderRoots').innerHTML = '';
@@ -2335,6 +2994,8 @@ async function browseFolder(path){
   }
   folderPick.path = data.path;
   document.getElementById('folderUsePath').textContent = data.path;
+  document.getElementById('folderUsePath').title = data.path;
+  if(folderPickTarget==='usb') updateUsbPickerSelection(data.path);
 
   // Clickable breadcrumb: every path segment jumps back to that level.
   const parts = data.path.split('/').filter(Boolean);
@@ -2348,16 +3009,36 @@ async function browseFolder(path){
   crumb.title = data.path;
 
   // Quick roots: home, Music, Downloads, Desktop, external volumes.
+  const roots=folderPickTarget==='usb'
+    ? [...window.usbPickerVolumePaths].map(path=>({
+        label:'💾 '+(path.split('/').filter(Boolean).pop()||path),path
+      }))
+    : (data.roots||[]);
   document.getElementById('folderRoots').innerHTML =
-    (data.roots||[]).map(r=>
+    roots.map(r=>
       `<button class="froot" onclick="browseFolder('${esc(r.path).replace(/'/g,"\\'")}')">${esc(r.label)}</button>`
     ).join('');
 
+  if(folderPickTarget==='usb'&&data.path==='/Volumes'){
+    const entries=data.entries.filter(entry=>window.usbPickerVolumePaths.has(entry.path));
+    list.innerHTML=entries.length?entries.map(e=>
+      `<div class="fitem" title="${esc(e.path)}" onclick="browseFolder('${esc(e.path).replace(/'/g,"\\'")}')">
+        <span class="fico">💾</span>
+        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(e.name)}</span>
+      </div>`
+    ).join(''):'<div class="fempty">No writable USB drives or SD cards are mounted. Insert or reconnect removable media, then browse again.</div>';
+    return;
+  }
+  if(folderPickTarget==='usb'&&window.usbPickerVolumePaths.has(data.path)){
+    list.innerHTML='<div class="fempty">Eligible removable media selected. A new export folder will be created at its root.</div>';
+    return;
+  }
   if(!data.entries.length){
     list.innerHTML = `<div class="fempty">This folder is empty</div>`;
     return;
   }
-  list.innerHTML = data.entries.map(e=>
+  const entries=data.entries;
+  list.innerHTML = entries.map(e=>
     `<div class="fitem" title="${esc(e.path)}" onclick="browseFolder('${esc(e.path).replace(/'/g,"\\'")}')">
       <span class="fico">📁</span>
       <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(e.name)}</span>
@@ -2368,6 +3049,7 @@ async function browseFolder(path){
 
 function onFolderSearchInput(){
   clearTimeout(folderSearchTimer);
+  if(folderPickTarget==='usb') updateUsbPickerSelection(null);
   const q = document.getElementById('folderSearchInput').value.trim();
   if(q.length < 2){
     browseFolder(folderPick.path || '');   // back to the folder tree
@@ -2377,18 +3059,25 @@ function onFolderSearchInput(){
 }
 
 async function searchFolders(q){
+  const requestId=++folderSearchRequest;
   const resp = await fetch('/api/folders/search?q='+encodeURIComponent(q));
   const data = await resp.json();
+  if(requestId!==folderSearchRequest || q!==document.getElementById('folderSearchInput').value.trim()) return;
+  const results=folderPickTarget==='usb'
+    ? data.results.filter(path=>window.usbPickerVolumePaths.has(path))
+    : data.results;
   document.getElementById('folderCrumb').innerHTML =
-    `<span style="color:var(--cyan)">🔍 “${esc(q)}”</span><span style="opacity:.5"> — ${data.results.length} folder(s)</span>`;
+    `<span style="color:var(--cyan)">🔍 “${esc(q)}”</span><span style="opacity:.5"> — ${results.length} folder(s)</span>`;
   document.getElementById('folderRoots').innerHTML =
     `<button class="froot" onclick="clearFolderSearch()">✕ Clear search</button>`;
   const list = document.getElementById('folderEntries');
-  if(!data.results.length){
-    list.innerHTML = `<div class="fempty">No folders named “${esc(q)}” found</div>`;
+  if(!results.length){
+    list.innerHTML = folderPickTarget==='usb'
+      ? '<div class="fempty">No writable USB drives or SD cards match this search.</div>'
+      : `<div class="fempty">No folders named “${esc(q)}” found</div>`;
     return;
   }
-  list.innerHTML = data.results.map(p=>{
+  list.innerHTML = results.map(p=>{
     const name = p.split('/').filter(Boolean).pop() || p;
     const parent = p.split('/').slice(0,-1).join('/') || '/';
     return `<div class="fitem" title="${esc(p)}" onclick="browseFolder('${esc(p).replace(/'/g,"\\'")}')">
@@ -2406,6 +3095,13 @@ function clearFolderSearch(){
 
 function usePickedFolder(){
   if(!folderPick.path) return;
+  if(folderPickTarget==='newlib'){
+    document.getElementById('newLibParent').value=folderPick.path;
+    closeFolderPicker();
+    updateNewLibPreview();
+    if(newLibMode==='fresh') document.getElementById('newLibName').focus();
+    return;
+  }
   if(folderPickTarget==='export'){
     document.getElementById('exportPathInput').value = folderPick.path;
     closeFolderPicker();
@@ -2418,6 +3114,16 @@ function usePickedFolder(){
     document.getElementById('folderInput').focus();
     return;
   }
+  if(folderPickTarget==='usb'){
+    if(!window.usbPickerVolumePaths.has(folderPick.path)){
+      updateUsbPickerSelection(null);
+      return;
+    }
+    document.getElementById('usbVolumeInput').value = folderPick.path;
+    closeFolderPicker();
+    updateUsbExportHints();
+    return;
+  }
   document.getElementById('importFolderPath').value = folderPick.path;
   closeFolderPicker();
   document.getElementById('importFolderPath').focus();
@@ -2425,8 +3131,12 @@ function usePickedFolder(){
 
 document.getElementById('folderSearchInput').addEventListener('input', onFolderSearchInput);
 document.addEventListener('keydown', e=>{
-  if(e.key==='Escape' && document.getElementById('folderPickerModal').classList.contains('open'))
-    closeFolderPicker();
+  if(e.key==='Escape'){
+    if(document.getElementById('folderPickerModal').classList.contains('open'))
+      closeFolderPicker();
+    if(document.getElementById('newLibModal').classList.contains('open'))
+      closeNewLibModal();
+  }
 });
 
 function setImportStatus(type, text) {
@@ -2467,33 +3177,6 @@ async function deleteFolder(name){
   else alert(`"${name}" had no songs left in the library.`);
 }
 
-// -- SYNC TO MIXXX ---------------------------------------------------------
-// Sends this crate's current song list to the backend, which writes it
-// directly into Mixxx's own database as a real crate. Mixxx must be closed
-// for this to work safely -- the backend checks and refuses otherwise.
-async function syncMixxxPlayCounts(){
-  const resp=await fetch('/api/sync/mixxx-play-counts',{method:'POST'});
-  const data=await resp.json();
-  if(data.ok){
-    await loadSongs(currentCrate);
-    alert(`Imported play counts for ${data.tracks_read} Mixxx tracks.`);
-  }else alert('Play-count sync failed: '+(data.error||'unknown error'));
-}
-
-async function markSongPlayed(btn, songId){
-  const resp=await fetch(`/api/songs/${songId}/played`,{method:'POST'});
-  const data=await resp.json();
-  if(!data.error){
-    const song=allSongs.find(s=>s.id===songId);
-    if(song) song.play_count=data.play_count;
-    // Acknowledge before the re-render: the count may be off-screen, so the
-    // button itself pulses and a toast confirms.
-    if(btn){ btn.classList.add('ack'); setTimeout(()=>btn.classList.remove('ack'), 550); }
-    toast(`+1 “${(song && song.title) || 'track'}”`);
-    applyFilters();
-  }
-}
-
 // -- TOAST --------------------------------------------------------------------
 let _toastTimer=null;
 function toast(msg){
@@ -2505,6 +3188,50 @@ function toast(msg){
   _toastTimer=setTimeout(()=>t.classList.remove('visible'), 2600);
 }
 
+// -- GENERIC LIBRARY SONG SEARCH PICKER --------------------------------------
+// Small reusable search-and-pick dialog over the whole library. Used by the
+// inline mashup editor to pick input/output songs. `opts`: {title, onPick}.
+let _songPickerState=null;
+async function openSongSearchPicker(opts){
+  const songs=window._atAllSongs && window._atAllSongs.length
+    ? window._atAllSongs : await (await fetch('/api/songs')).json();
+  window._songPickerAll=songs;
+  _songPickerState=opts;
+  document.getElementById('songPickerTitle').textContent=opts.title||'Pick a song';
+  document.getElementById('songPickerSearch').value='';
+  renderSongPickerList('');
+  document.getElementById('songPickerModal').classList.add('open');
+  setTimeout(()=>document.getElementById('songPickerSearch')?.focus(),50);
+}
+function renderSongPickerList(q){
+  const list=document.getElementById('songPickerList');
+  if(!list) return;
+  q=(q||'').toLowerCase().trim();
+  const songs=(window._songPickerAll||[]).filter(s=>!q
+    || (s.title||'').toLowerCase().includes(q)
+    || (s.artist||'').toLowerCase().includes(q)
+    || (s.filename||'').toLowerCase().includes(q)).slice(0,100);
+  list.innerHTML=songs.map(s=>`
+    <div class="nav-item" onclick="songPickerChoose(${s.id})">
+      <span class="nav-item-label">${esc(s.title||cleanName(s.filename))}
+        <span style="color:var(--muted2);font-size:9.5px">— ${esc(s.artist||'?')}</span></span>
+    </div>`).join('') || '<div class="ts-empty" style="padding:8px 6px">No songs match</div>';
+}
+function songPickerChoose(id){
+  const s=(window._songPickerAll||[]).find(x=>x.id===id);
+  document.getElementById('songPickerModal').classList.remove('open');
+  if(s && _songPickerState?.onPick) _songPickerState.onPick(s);
+  _songPickerState=null;
+}
+function closeSongPicker(){
+  document.getElementById('songPickerModal').classList.remove('open');
+  _songPickerState=null;
+}
+
+// -- SYNC TO MIXXX ---------------------------------------------------------
+// Sends this crate's current song list to the backend, which writes it
+// directly into Mixxx's own database as a real crate. Mixxx must be closed
+// for this to work safely -- the backend checks and refuses otherwise.
 async function syncCrateToMixxx(crateId) {
   const btn = document.getElementById(`sync-btn-${crateId}`);
   const originalText = btn.textContent;
@@ -2594,38 +3321,19 @@ function addFolderToCrate(folderName) {
 
 // -- DRAG & DROP: song → crate, and crate reorder -----------------------------
 // Song rows are HTML5-draggable. Dropping on a MANUAL crate adds the song(s).
-// Dropping on a SMART crate asks whether to add the crate's genre tags to the
-// song(s) so they match its rules -- rules on BPM/key/duration/artist/year/
-// play count can't be "added", only genre can. Dragging a row that's part of a
-// multi-selection carries the whole selection.
+// Dropping on a SMART crate asks whether to stamp what its rules need onto the
+// song(s) so they match -- the crate's genres go into the genre field and its
+// tags into the tag store (never the other way round). Dragging a row that's
+// part of a multi-selection carries the whole selection.
 // Crate rows themselves are draggable too: dragging one onto a crate in the
 // SAME manual/smart section reorders the list (persisted to the backend).
 let _dragSongIds = [];
 let _dragCrateId  = null;
 let _dragCrateSmart = 0;
 
-// The genre values a smart crate's rules require ("tags"). Only rules on the
-// genre field qualify -- numeric/identity fields (BPM, key, duration, artist,
-// year, play count) can't be stamped onto a song.
-function parseCrateTags(rulesJson){
-  const seen = new Set();
-  try{
-    return (JSON.parse(rulesJson||'[]')||[])
-      .filter(r=>r && r.field==='genre' && r.value && String(r.value).trim())
-      .map(r=>String(r.value).trim())
-      .filter(t=>{ const k=t.toLowerCase(); if(seen.has(k)) return false; seen.add(k); return true; });
-  }catch(e){ return []; }
-}
-
-// Adds tags to a song's semicolon-separated genre string without duplicating
-// anything it already carries.
-function mergeGenreTags(existing, tags){
-  const parts=(existing||'').split(';').map(s=>s.trim()).filter(Boolean);
-  for(const t of tags){
-    if(!parts.some(p=>p.toLowerCase()===t.toLowerCase())) parts.push(t);
-  }
-  return parts.join('; ');
-}
+// What a smart crate's rules need stamped onto a song -- a genre rule needs a
+// genre, a tag rule needs a tag (crateRuleValues, tag-utils.js). Rules on
+// BPM/key/duration/artist/year can only be filtered, never stamped.
 
 function onSongDragStart(event, songId){
   _dragSongIds = selectedIds.has(songId) ? [...selectedIds] : [songId];
@@ -2703,11 +3411,11 @@ async function onCrateDrop(event, crateId, isSmart, crateName){
       : [parseInt(event.dataTransfer.getData('text/plain'))];
     if(!ids.length || ids.some(isNaN)) return;
     if(isSmart){
-      // Smart crate: ask before stamping its genre tags onto the song(s).
+      // Smart crate: ask before stamping what its rules need onto the song(s).
       const crate=(window._allCrates||[]).find(c=>c.id===crateId);
-      const tags=crate ? parseCrateTags(crate.rules) : [];
-      if(!tags.length){
-        toast('This smart crate only filters by BPM/key/duration etc. — nothing to tag');
+      const needed=crate ? crateRuleValues(crate.rules) : {genres:[], tags:[]};
+      if(!needed.genres.length && !needed.tags.length){
+        toast('This smart crate only filters by BPM/key/duration etc. — nothing to stamp');
         return;
       }
       const names=ids.map(id=>{
@@ -2715,20 +3423,39 @@ async function onCrateDrop(event, crateId, isSmart, crateName){
         return s ? (s.title||s.filename||`song #${id}`) : `song #${id}`;
       });
       const label=ids.length===1 ? `“${names[0]}”` : `${ids.length} songs`;
-      const tagList=tags.map(t=>`“${t}”`).join(', ');
-      if(!confirm(`Add tag ${tagList} to ${label}?\n\nThis makes the song${ids.length===1?'':'s'} match the smart crate “${crateName}”.`)) return;
+      const wanted=[];
+      if(needed.genres.length) wanted.push(`genre ${needed.genres.map(g=>`“${g}”`).join(', ')}`);
+      if(needed.tags.length) wanted.push(`tag ${needed.tags.map(t=>`“${t}”`).join(', ')}`);
+      if(!confirm(`Add ${wanted.join(' and ')} to ${label}?\n\nThis makes the song${ids.length===1?'':'s'} match the smart crate “${crateName}”.`)) return;
       let changed=0;
       for(const id of ids){
         const s=allSongs.find(x=>x.id===id);
-        const merged=mergeGenreTags(s?.genre,tags);
-        if((s?.genre||'')===merged) continue;   // already carries every tag
-        await fetch(`/api/songs/${id}`, {method:'PATCH', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({genre: merged})});
-        if(s) s.genre=merged;
-        changed++;
+        let touched=false;
+        if(needed.genres.length){
+          const merged=mergeGenreList(s?.genre, needed.genres);
+          if((s?.genre||'')!==merged){
+            await fetch(`/api/songs/${id}`, {method:'PATCH', headers:{'Content-Type':'application/json'},
+              body: JSON.stringify({genre: merged})});
+            if(s) s.genre=merged;
+            touched=true;
+          }
+        }
+        if(needed.tags.length){
+          const have=(s?.tags||[]).map(t=>t.toLowerCase());
+          const missing=needed.tags.filter(t=>!have.includes(t.toLowerCase()));
+          if(missing.length){
+            const resp=await fetch(`/api/songs/${id}/tags`, {method:'POST',
+              headers:{'Content-Type':'application/json'}, body: JSON.stringify({add: missing})});
+            const data=await resp.json().catch(()=>({}));
+            if(s && Array.isArray(data.tags)) s.tags=data.tags;
+            touched=true;
+          }
+        }
+        if(touched) changed++;
       }
       if(!changed){ toast(`Already matches “${crateName}”`); return; }
-      toast(`Tagged ${changed} song${changed===1?'':'s'} — now in “${crateName}”`);
+      toast(`Stamped ${changed} song${changed===1?'':'s'} — now in “${crateName}”`);
+      await loadTagSuggestions();
       if(currentCrate===crateId) loadSongs(crateId);
       return;
     }
@@ -2769,12 +3496,11 @@ function addRule() {
     <select class="rule-sel" id="rf-${id}" onchange="updateRuleOps(${id})">
       <option value="bpm">BPM</option>
       <option value="genre">Genre</option>
+      <option value="tag">Tag</option>
       <option value="musical_key">Key</option>
       <option value="duration_seconds">Duration (sec)</option>
       <option value="artist">Artist</option>
       <option value="year">Year</option>
-      <option value="play_count">Play count</option>
-      <option value="least_played">Least played</option>
     </select>
     <select class="rule-sel" id="ro-${id}">
       <option value="gte">≥</option>
@@ -2790,11 +3516,18 @@ function addRule() {
 function updateRuleOps(id) {
   const field=document.getElementById(`rf-${id}`).value;
   const opSel=document.getElementById(`ro-${id}`);
-  if(['bpm','duration_seconds','play_count'].includes(field)){
+  if(['bpm','duration_seconds'].includes(field)){
     opSel.innerHTML='<option value="gte">≥</option><option value="lte">≤</option><option value="eq">=</option>';
   } else {
     opSel.innerHTML='<option value="contains">contains</option><option value="eq">=</option>';
   }
+  // Genre rules suggest genres, tag rules suggest tags -- two separate lists,
+  // because they are two separate things.
+  const valInp=document.getElementById(`rv-${id}`);
+  if(!valInp) return;
+  if(field==='tag'){ valInp.setAttribute('list','tagEditList'); valInp.placeholder='tag name'; }
+  else if(field==='genre'){ valInp.setAttribute('list','genreEditList'); valInp.placeholder='value'; }
+  else { valInp.removeAttribute('list'); valInp.placeholder='value'; }
 }
 
 function toggleCrateType() {
@@ -2950,10 +3683,9 @@ function applyFilters(){
   let songs=getFiltered();
   const {field,asc}=currentSort;
   songs.sort((a,b)=>{
-    const sortField=field==='least_played'?'play_count':field;
-    let va=a[sortField]??0,vb=b[sortField]??0;
+    let va=a[field]??0,vb=b[field]??0;
     if(va==null) return 1;if(vb==null) return -1;
-    if(sortField==='musical_key'){              // sort by wheel position, not raw string
+    if(field==='musical_key'){              // sort by wheel position, not raw string
       va=camelotNum(va)??va;vb=camelotNum(vb)??vb;
     }
     if(typeof va==='string') va=va.toLowerCase();
@@ -2989,8 +3721,6 @@ function cellForColumn(key, s, v) {
       return `<div class="sdur" data-colkey="duration_seconds">${v.dur}</div>`;
     case 'file_size_bytes':
       return `<div class="sdur" data-colkey="file_size_bytes" style="color:var(--muted)">${v.size}</div>`;
-    case 'play_count':
-      return `<div class="sdur" data-colkey="play_count" style="color:var(--purple)">${s.play_count||0}</div>`;
   }
   return '';
 }
@@ -3014,7 +3744,7 @@ function renderSongs(songs){
              Three ways to fill it:<br>
              ① Paste a Spotify link or song name in the <b>Download</b> box and hit GET<br>
              ② Drop files into your music folder — they appear here automatically<br>
-             ③ Tools → Import Folder to copy in an existing collection</div>
+             ③ Import Folder (top left) to copy in an existing collection</div>
            <button class="btn-ghost" style="width:auto;margin-top:4px" onclick="openIntroGuide()">📖 Open the intro guide</button></div>`;
     } else {
       rows.innerHTML = `<div class="empty"><div class="empty-icon">♫</div>
@@ -3049,7 +3779,6 @@ function renderSongs(songs){
         ${dataCells}
         <div class="row-acts" onclick="event.stopPropagation()">
           <button class="show-btn" onclick="playSong(${s.id})" title="Preview in the player bar (double-click row works too)">▶</button>
-          <button class="show-btn" id="played-${s.id}" onclick="markSongPlayed(this,${s.id})" title="Increase play count">+1</button>
           <button class="show-btn" onclick="revealInFinder('${fp.replace(/'/g,"\\'")}')">Show</button>
           <button class="del-btn" onclick="deleteSong(${s.id},'${title}')">✕</button>
         </div>
@@ -3221,6 +3950,10 @@ async function openInfoModal(ids, event){
   note.textContent=`Editing ${targetIds.length} songs. Leave a field blank to keep each song's current value.`;
 
   document.getElementById('infoModal').dataset.ids = JSON.stringify(targetIds);
+  // What the Tags field started as, so saving can tell "untouched" from
+  // "emptied on purpose" (blanking it removes every tag).
+  document.getElementById('infoModal').dataset.tagPrefill =
+    isBatchEdit ? '' : formatTagLine(firstSong?.tags);
 
   const fields=[
     {key:'title',  label:'Title',  val:isBatchEdit?'':(firstSong?.title||'')},
@@ -3228,6 +3961,7 @@ async function openInfoModal(ids, event){
     {key:'album',  label:'Album',  val:isBatchEdit?'':(firstSong?.album||'')},
     {key:'year',   label:'Year',   val:isBatchEdit?'':(firstSong?.year||'')},
     {key:'genre',  label:'Genre',  val:isBatchEdit?'':(firstSong?.genre||''), list:'genreEditList'},
+    {key:'tags',   label:'Tags',   val:isBatchEdit?'':formatTagLine(firstSong?.tags), list:'tagEditList'},
     {key:'bpm',    label:'BPM',    val:isBatchEdit?'':(firstSong?.bpm?Math.round(firstSong.bpm):'')},
     {key:'musical_key',label:'Key',val:isBatchEdit?'':(displayKey(firstSong?.musical_key)||'')},
   ];
@@ -3251,6 +3985,7 @@ async function openInfoModal(ids, event){
   // Open the modal immediately -- transitions render in when they arrive, so
   // a slow fetch can never make right-click feel laggy.
   window._editingTransId=null;
+  renderCleanupSection(isBatchEdit ? null : firstSong);
   document.getElementById('infoModal').classList.add('open');
   renderTransitionsSection(isBatchEdit ? null : firstSong?.id);
 }
@@ -3274,17 +4009,35 @@ async function saveInfo(){
   if(updates.bpm) updates.bpm=parseFloat(updates.bpm)||null;
   if(updates.musical_key) updates.musical_key=fromCamelot(updates.musical_key)||updates.musical_key;
 
+  // Tags: the field shows this song's own tags, so editing it (or clearing it)
+  // is what gets saved. A batch edit only stamps tags when some were typed --
+  // there, blank still means "keep each song's own".
+  const tagsEl=document.getElementById('info-tags');
+  const tagPrefill=document.getElementById('infoModal').dataset.tagPrefill||'';
+  const tagsTyped=tagsEl ? tagsEl.value.trim() : null;
+  let tagsPayload;
+  if(tagsEl && (ids.length>1 ? tagsTyped!=='' : tagsTyped!==tagPrefill))
+    tagsPayload=parseTagInput(tagsTyped);
+  if(tagsPayload!==undefined) updates.tags=tagsPayload;
+
   if(ids.length>1){
     await fetch('/api/songs/batch',{method:'PATCH',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({ids,...updates})});
+    if(tagsPayload!==undefined)
+      ids.forEach(id=>{ const s=allSongs.find(x=>x.id===id); if(s) s.tags=tagsPayload.slice(); });
   } else if(ids.length===1){
     await fetch(`/api/songs/${ids[0]}`,{method:'PATCH',headers:{'Content-Type':'application/json'},
       body:JSON.stringify(updates)});
     Object.assign(allSongs.find(s=>s.id===ids[0])||{},updates);
+    if(tagsPayload!==undefined){
+      const s=allSongs.find(x=>x.id===ids[0]);
+      if(s) s.tags=tagsPayload.slice();
+    }
   }
   closeInfoModal();
   clearSelection();
   await loadGenreSuggestions();
+  await loadTagSuggestions();
   await loadSongs(currentCrate);
 }
 
@@ -3298,11 +4051,69 @@ function closeInfoModal(){
   window._editingTransId=null;
 }
 
-// ── TRANSITIONS ───────────────────────────────────────────────────────────────
+// ── CLEANUP FROM THE SONG INFO PANEL ─────────────────────────────────────
+// A compact cleanup section at the bottom of the metadata page: find the
+// Spotify match for THIS track, then accept it (with an Edit option) or
+// reject it — same building blocks as the bulk review panel.
+function renderCleanupSection(song){
+  const wrap = document.getElementById('cleanupSection');
+  if(!wrap) return;
+  if(!song){ wrap.innerHTML=''; wrap.style.display='none'; return; }
+  wrap.style.display='';
+  const decided = !!song.cleanup_scanned_at;
+  const dec = song.cleanup_decision;
+  const decLabel = { applied:'✓ cleaned via Spotify', rejected:'✕ kept as-is (rejected)',
+                     no_match:'∅ no Spotify match', skipped:'… left undecided' }[dec] || null;
+  const badge = dec === 'applied' ? ['green','green']
+              : dec === 'rejected' ? ['red','red']
+              : ['chip','muted'];   // no_match / skipped / unknown
+  wrap.innerHTML = `
+    <div class="ts-hdr">
+      <span class="ts-title">✨ Clean up metadata</span>
+      ${decided
+        ? `<span style="font-family:var(--mono);font-size:9px;padding:2px 7px;border-radius:100px;
+             background:var(--${badge[0]});color:var(--${badge[1]})">${esc(decLabel||dec||'scanned')}</span>`
+        : `<button class="btn-sel" title="Match this track on Spotify and propose proper tags"
+             onclick="cleanupFromInfo(${song.id})">✨ Find on Spotify…</button>`}
+    </div>
+    <div id="cleanupSectionBody"></div>`;
+}
+
+// Fetches the Spotify proposal for the song open in the info panel and shows
+// the accept / edit / reject controls inline.
+async function cleanupFromInfo(songId){
+  const body = document.getElementById('cleanupSectionBody');
+  if(!body) return;
+  body.innerHTML = `<div style="font-size:11px;color:var(--muted);padding:6px 2px">Matching on Spotify…</div>`;
+  try{
+    const r = await fetch(`/api/cleanup/match/${songId}`);
+    const d = await r.json();
+    if(r.status === 400 && d.error){ body.innerHTML = `<div class="ts-empty">${esc(d.error)}</div>`; return; }
+    if(!d || !d.found){
+      body.innerHTML = `<div class="ts-empty">No Spotify match found. You can still edit the tags above and save.</div>`;
+      markCleanupDecision([songId], 'no_match');
+      return;
+    }
+    cleanupProposals = [d];
+    cleanupEdits.delete(songId);
+    cleanupEditingId = null;
+    cleanupBusy = false;
+    renderCleanupReview();
+    body.innerHTML = cuDiffRow(d);   // same row + buttons as the bulk panel
+  }catch(e){
+    body.innerHTML = `<div class="ts-empty">Could not reach Spotify.</div>`;
+  }
+}
+
+// ── TRANSITIONS ─────────────────────────────────────────────────────────────
 // A transition is a directional mix note: "this song goes INTO that one".
 // Targets are either library songs (to_song_id) or text-only track names
-// (to_text) for things you don't own yet. The full view lives inside the
-// Song Info modal (right-click any row); the sidebar tab is the browse-all.
+// (to_text) for things you don't own yet. A MASHUP is a special row: the
+// source is the mashup file itself, its target is the OUTPUT song the mashup
+// lands into, and mashup_input_song_id / mashup_input_text name the INPUT
+// song it blends in from (library song or free text). The full view lives
+// inside the Song Info modal (right-click any row); the sidebar tab is the
+// browse-all.
 let pendingTransitionFromId = null;
 let pendingTransitionToId   = null;
 
@@ -3311,6 +4122,7 @@ async function renderTransitionsSection(songId){
   if(!wrap) return;
   if(!songId||isBatchEdit){ wrap.style.display='none'; return; }
   wrap.style.display='';
+  await fetchTransitionTags();
   let data;
   try{
     const resp=await fetch(`/api/songs/${songId}/transitions`);
@@ -3329,7 +4141,11 @@ async function renderTransitionsSection(songId){
   wrap.innerHTML=`
     <div class="ts-hdr">
       <span class="ts-title">⇄ Transitions</span>
-      <button class="btn-sel" onclick="openAddTransitionModal(${songId})">+ Add</button>
+      <span style="display:flex;gap:6px">
+        <button class="btn-sel" onclick="openAddMashupModal(${songId})"
+          title="This song IS a mashup — record the input song it blends in from and the output song it lands into">⇄ Mashup</button>
+        <button class="btn-sel" onclick="openAddTransitionModal(${songId})">+ Add</button>
+      </span>
     </div>
     <div class="ts-group-label">From this song (${out.length})</div>
     ${outHtml}
@@ -3337,9 +4153,20 @@ async function renderTransitionsSection(songId){
     ${incHtml}`;
 }
 
+// Shared name/link builder for a mashup ingredient (input song or typed text).
+// dir='in' for a row's input; 'out' for the output target.
+function mashIngredientHtml(t){
+  if(t.mashup_input_song_id){
+    return `<span class="ts-click" title="Jump to this song" onclick="jumpToSong(${t.mashup_input_song_id})">${esc(t.mi_title||'?')}</span>
+      <span class="ts-artist">— ${esc(t.mi_artist||'?')}</span>`;
+  }
+  return `<span class="ts-mi-plain">${esc(t.mashup_input_text||'?')}</span><span class="ts-notlib">not in library</span>`;
+}
+
 // One transition row in the info modal. dir='out' means "from this song → target",
 // dir='in' means "source → this song". Library targets are clickable and jump
 // to the song; text-only targets show an italic name + a "not in library" badge.
+// Mashup rows (source = the mashup itself) show a ⇄ badge + their input song.
 function transRowHtml(t, dir){
   const isOut = dir==='out';
   const arrow = isOut ? '→' : '←';
@@ -3353,14 +4180,18 @@ function transRowHtml(t, dir){
        <span class="ts-artist">— ${esc(t.from_artist||'?')}</span>`;
   const notes = t.notes ? `<div class="ts-notes">${esc(t.notes)}</div>` : '';
   const tag = t.tag ? `<span class="ts-tag">${esc(t.tag)}</span>` : '';
-  const reverseBtn = (isOut && t.to_song_id)
+  const mashBadge = t.is_mashup_track ? '<span class="ts-mash">⇄ Mashup</span>' : '';
+  const mashIn = (isOut && t.is_mashup_track)
+    ? `<div class="ts-mi">in: ${mashIngredientHtml(t)}</div>` : '';
+  const reverseBtn = (isOut && t.to_song_id && !t.is_mashup_track)
     ? `<button class="ts-act" title="Add the reverse link (target → this song)" onclick="addReverseTransition(${t.id})">⇄</button>`
     : '';
   return `
     <div class="ts-row" id="trow-${t.id}">
       <div class="ts-arrow${isOut?'':' in'}">${arrow}</div>
       <div class="ts-info">
-        <div class="ts-name">${target}${tag}</div>
+        <div class="ts-name">${target}${mashBadge}${tag}</div>
+        ${mashIn}
         ${notes}
       </div>
       <div class="ts-acts">
@@ -3372,17 +4203,39 @@ function transRowHtml(t, dir){
     </div>`;
 }
 
-// Inline edit form (notes + tag) that replaces a row while editing.
+// Inline edit form (notes + tag; mashups also get their input + output)
+// that replaces a row while editing.
 function transEditHtml(t){
   const folderSel = transFolderSelectHtml(t.folder_id, `te-folder-${t.id}`);
+  const mashParts = t.is_mashup_track ? `
+    <div style="width:100%;margin-top:2px">
+      <div class="ts-group-label" style="margin:6px 0 3px">in (input song) — ⇄ mashup</div>
+      <div style="display:flex;gap:6px;align-items:center">
+        <input class="ii" id="te-mi-text-${t.id}" placeholder="or type the input song's name…"
+          value="${esc(t.mashup_input_song_id?'':(t.mashup_input_text||''))}"
+          style="flex:1;min-width:150px" oninput="mashPickTextInput(${t.id},'in')">
+        <button class="btn-ghost" style="width:auto;margin:0;flex-shrink:0" onclick="openMashSongPicker(${t.id},'in')">🎵 From library…</button>
+      </div>
+      <div class="ts-mi" id="te-mi-cur-${t.id}" style="margin-top:4px">in: ${mashIngredientHtml(t)}</div>
+      <div class="ts-group-label" style="margin:8px 0 3px">out (output song)</div>
+      <div style="display:flex;gap:6px;align-items:center">
+        <input class="ii" id="te-out-text-${t.id}" placeholder="or type the output song's name…"
+          value="${esc(t.to_song_id?'':(t.to_text||''))}"
+          style="flex:1;min-width:150px" oninput="mashPickTextInput(${t.id},'out')">
+        <button class="btn-ghost" style="width:auto;margin:0;flex-shrink:0" onclick="openMashSongPicker(${t.id},'out')">🎵 From library…</button>
+      </div>
+      <div class="ts-mi" id="te-out-cur-${t.id}" style="margin-top:4px">out: ${t.to_song_id
+        ? `<span class="ts-click">${esc(t.to_title||t.to_filename||'?')}</span><span class="ts-artist">— ${esc(t.to_artist||'?')}</span>`
+        : `<span class="ts-mi-plain">${esc(t.to_text||'?')}</span>`}</div>
+    </div>` : '';
   return `
     <div class="ts-row" id="trow-${t.id}">
       <div class="ts-arrow">✎</div>
       <div class="ts-edit">
         <input class="ii" id="te-notes-${t.id}" placeholder="Notes — technique, timing…"
           value="${esc(t.notes||'')}" style="flex:1;min-width:150px">
-        <input class="ii" id="te-tag-${t.id}" placeholder="Tag (e.g. energy +1)"
-          value="${esc(t.tag||'')}" style="width:130px">
+        ${tagComboHtml('te-tag-'+t.id, t.tag||'', 'width:130px')}
+        ${mashParts}
         ${folderSel}
         <button class="btn-sel" onclick="saveTransitionEdit(${t.id})">Save</button>
         <button class="btn-sel"
@@ -3391,16 +4244,59 @@ function transEditHtml(t){
     </div>`;
 }
 
+// Typing in a mashup text field clears the library-picked song for that part.
+function mashPickTextInput(id, part){
+  window['_mashPick_'+part+'_'+id] = null;
+  const cur = document.getElementById(part==='in' ? `te-mi-cur-${id}` : `te-out-cur-${id}`);
+  if(cur) cur.textContent = part==='in' ? 'in: (typed text)' : 'out: (typed text)';
+}
+
+// Library-song mini-picker for a mashup part ('in' | 'out'). Picks into
+// window._mashPick_<part>_<id>; Save prefers the pick over typed text.
+async function openMashSongPicker(rowId, part){
+  if(!window._atAllSongs) window._atAllSongs=await (await fetch('/api/songs')).json();
+  openSongSearchPicker({
+    title: part==='in' ? 'Input song — blends in from' : 'Output song — lands into',
+    onPick: s => {
+      window['_mashPick_'+part+'_'+rowId] = s.id;
+      const txt = document.getElementById(part==='in' ? `te-mi-text-${rowId}` : `te-out-text-${rowId}`);
+      if(txt) txt.value='';
+      const cur = document.getElementById(part==='in' ? `te-mi-cur-${rowId}` : `te-out-cur-${rowId}`);
+      if(cur) cur.innerHTML = (part==='in'?'in: ':'out: ')
+        + `<span class="ts-click">${esc(s.title||s.filename)}</span><span class="ts-artist">— ${esc(s.artist||'?')}</span>`;
+    }
+  });
+}
+
 async function saveTransitionEdit(id){
   const notes=document.getElementById(`te-notes-${id}`)?.value.trim()||'';
   const tag=document.getElementById(`te-tag-${id}`)?.value.trim()||'';
   const folderEl=document.getElementById(`te-folder-${id}`);
   const folder_id=folderEl ? (folderEl.value ? parseInt(folderEl.value,10) : null) : undefined;
+  const body={notes,tag,folder_id};
+  // Mashup rows: library picks (window._mashPick_*) win over typed text.
+  if(document.getElementById(`te-mi-text-${id}`)){
+    const miText=document.getElementById(`te-mi-text-${id}`).value.trim();
+    const miSong=window['_mashPick_in_'+id]||null;
+    if(!miSong && !miText){ alert('The mashup needs an input song — pick one from the library or type its name.'); return; }
+    body.mashup_input_song_id=miSong||undefined;
+    body.mashup_input_text=miSong?undefined:miText;
+  }
+  if(document.getElementById(`te-out-text-${id}`)){
+    const outText=document.getElementById(`te-out-text-${id}`).value.trim();
+    const outSong=window['_mashPick_out_'+id]||null;
+    if(!outSong && !outText){ alert('The mashup needs an output song — pick one from the library or type its name.'); return; }
+    body.to_song_id=outSong||undefined;
+    body.to_text=outSong?undefined:outText;
+  }
   await fetch(`/api/transitions/${id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({notes,tag,folder_id})});
+    body:JSON.stringify(body)});
+  fetchTransitionTags(true);          // a new tag becomes a suggestion for the next one
   window._editingTransId=null;
+  window['_mashPick_in_'+id]=null; window['_mashPick_out_'+id]=null;
   if(currentSong) renderTransitionsSection(currentSong.id);
   if(document.getElementById('tab-transitions').classList.contains('active')) renderTransitionTab();
+  if(document.getElementById('tab-mashups').classList.contains('active')) renderMashupsTab();
 }
 
 async function deleteTransition(id){
@@ -3408,6 +4304,7 @@ async function deleteTransition(id){
   await fetch(`/api/transitions/${id}`,{method:'DELETE'});
   if(currentSong) renderTransitionsSection(currentSong.id);
   if(document.getElementById('tab-transitions').classList.contains('active')) renderTransitionTab();
+  if(document.getElementById('tab-mashups').classList.contains('active')) renderMashupsTab();
 }
 
 // Mirrors a library→library link the other way around, copying notes/tag.
@@ -3424,39 +4321,59 @@ async function addReverseTransition(id){
 }
 
 // -- ADD TRANSITION PICKER ---------------------------------------------------
-async function openAddTransitionModal(sourceId){
+async function openAddTransitionModal(sourceId, mashupMode){
   // Always refresh the picker list so freshly downloaded songs show up
   window._atAllSongs=await (await fetch('/api/songs')).json();
+  await fetchTransitionTags();
   pendingTransitionFromId=sourceId||null;
   pendingTransitionToId=null;
+  window._pendingMashupInputId=null;
   const fixedFrom=sourceId ? window._atAllSongs.find(s=>s.id===sourceId) : null;
+  const isMashup=!!mashupMode;
   const body=document.getElementById('addTransitionBody');
   body.innerHTML=`
     ${fixedFrom
-      ? `<div class="ts-group-label">From</div>
-         <div class="ts-row"><div class="ts-arrow">♪</div>
+      ? `<div class="ts-group-label">${isMashup?'The mashup':'From'}</div>
+         <div class="ts-row"><div class="ts-arrow">${isMashup?'⇄':'♪'}</div>
            <div class="ts-info"><div class="ts-name">${esc(fixedFrom.title||fixedFrom.filename)}
              <span class="ts-artist">— ${esc(fixedFrom.artist||'?')}</span></div></div></div>`
-      : `<div class="ts-group-label">From (source song)</div>
-         <input class="ii" id="atFromSearch" placeholder="Search source song…"
+      : `<div class="ts-group-label">${isMashup?'Mashup (this song)':'From (source song)'}</div>
+         <input class="ii" id="atFromSearch" placeholder="Search for the song…"
            oninput="atRenderList('atFromList','atFromSearch',true)" style="width:100%;margin-bottom:6px">
          <div class="nav-list" id="atFromList" style="padding:0;max-height:150px;overflow-y:auto;
            border:1px solid var(--border);border-radius:8px"></div>`}
-    <div class="ts-group-label" style="margin-top:12px">To (target)</div>
-    <input class="ii" id="atSearch" placeholder="Search library for the target song…"
+    ${isMashup
+      ? `<div class="ts-group-label" style="margin-top:12px;color:var(--green)">In — the input song it blends in from</div>
+         <input class="ii" id="atMiSearch" placeholder="Search library for the input song…"
+           oninput="atRenderList('atMiList','atMiSearch')" style="width:100%;margin-bottom:6px">
+         <div class="nav-list" id="atMiList" style="padding:0;max-height:150px;overflow-y:auto;
+           border:1px solid var(--border);border-radius:8px"></div>
+         <input class="ii" id="atMiText" placeholder="…or type the input song's name (not in the library yet)"
+           style="width:100%;margin-top:6px" oninput="onMashupInputTextInput()">`
+      : ''}
+    <div class="ts-group-label" style="margin-top:12px;color:${isMashup?'var(--green)':'inherit'}">${isMashup?'Out — where the mashup lands':'To (target)'}</div>
+    <input class="ii" id="atSearch" placeholder="Search library for the ${isMashup?'output':'target'} song…"
       oninput="atRenderList('atSongList','atSearch',false)" style="width:100%;margin-bottom:6px">
     <div class="nav-list" id="atSongList" style="padding:0;max-height:150px;overflow-y:auto;
       border:1px solid var(--border);border-radius:8px"></div>
-    <div style="margin:12px 0;display:flex;align-items:center;gap:8px;color:var(--muted2);
-      font-family:var(--mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase">
-      <div style="flex:1;height:1px;background:var(--border)"></div>or a text-only track
-      <div style="flex:1;height:1px;background:var(--border)"></div>
-    </div>
-    <input class="ii" id="atText" placeholder="Track name — e.g. “that edit from the club night”"
+    ${isMashup
+      ? `<div style="margin:12px 0;display:flex;align-items:center;gap:8px;color:var(--muted2);
+         font-family:var(--mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase">
+         <div style="flex:1;height:1px;background:var(--border)"></div>or type the output song
+         <div style="flex:1;height:1px;background:var(--border)"></div>
+       </div>`
+      : `<div style="margin:12px 0;display:flex;align-items:center;gap:8px;color:var(--muted2);
+         font-family:var(--mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase">
+         <div style="flex:1;height:1px;background:var(--border)"></div>or a text-only track
+         <div style="flex:1;height:1px;background:var(--border)"></div>
+       </div>`}
+    <input class="ii" id="atText" placeholder="${isMashup
+      ? "…or type the output song's name (not in the library yet)"
+      : 'Track name — e.g. “that edit from the club night”'}"
       style="width:100%;margin-bottom:8px" oninput="onTransitionTextInput()">
     <div style="display:flex;gap:8px">
       <input class="ii" id="atNotes" placeholder="Notes — technique, timing…" style="flex:1">
-      <input class="ii" id="atTag" placeholder="Tag (e.g. energy +1)" style="width:140px">
+      ${tagComboHtml('atTag','','width:140px')}
     </div>
     <div id="atFolderWrap" style="margin-top:10px;display:flex;align-items:center;gap:8px">
       <span class="ts-group-label" style="margin:0;padding:0">📁 Folder</span>
@@ -3470,13 +4387,21 @@ async function openAddTransitionModal(sourceId){
     </label>
     <div style="margin-top:14px;display:flex;gap:8px;justify-content:flex-end">
       <button class="btn-ghost" style="width:auto;margin:0" onclick="closeAddTransitionModal()">Cancel</button>
-      <button class="btn-save" onclick="confirmAddTransition()">Add Transition</button>
+      <button class="btn-save" onclick="confirmAddTransition()">${isMashup?'Add Mashup':'Add Transition'}</button>
     </div>`;
   if(!fixedFrom) atRenderList('atFromList','atFromSearch',true);
+  if(isMashup) atRenderList('atMiList','atMiSearch');
   atRenderList('atSongList','atSearch',false);
   populateTransitionFolderSelect('atFolder', transSelectedFolder,
     'All transitions (no folder)');
+  const ttl=document.getElementById('addTransitionTitle');
+  if(ttl) ttl.textContent = isMashup ? '⇄ Add Mashup' : '⇄ Add Transition';
   document.getElementById('addTransitionModal').classList.add('open');
+}
+
+// Convenience wrapper: open the picker in mashup mode (input + output song).
+async function openAddMashupModal(sourceId){
+  await openAddTransitionModal(sourceId, true);
 }
 
 // Shared renderer for the From and To song lists inside the picker.
@@ -3486,14 +4411,19 @@ function atRenderList(listId, searchId, isFrom){
   if(!list) return;
   const songs=(window._atAllSongs||[]).filter(s=>{
     if(pendingTransitionFromId && !isFrom && s.id===pendingTransitionFromId) return false;
+    if(listId==='atMiList' && (s.id===pendingTransitionFromId || s.id===pendingTransitionToId)) return false;
+    if(listId==='atSongList' && (s.id===pendingTransitionFromId || s.id===window._pendingMashupInputId)) return false;
     return !q || (s.title||'').toLowerCase().includes(q)
       || (s.artist||'').toLowerCase().includes(q)
       || (s.filename||'').toLowerCase().includes(q);
   }).slice(0,80);
   list.innerHTML=songs.map(s=>{
-    const active=isFrom ? pendingTransitionFromId===s.id : pendingTransitionToId===s.id;
+    const active=isFrom ? pendingTransitionFromId===s.id
+      : listId==='atMiList' ? window._pendingMashupInputId===s.id
+      : pendingTransitionToId===s.id;
+    const pickFn=listId==='atMiList' ? 'pickMashupInputSong' : (isFrom?'pickFromSong':'pickToSong');
     return `<div class="nav-item ${active?'active':''}" id="${listId}-${s.id}"
-        onclick="${isFrom?'pickFromSong':'pickToSong'}(${s.id},this)">
+        onclick="${pickFn}(${s.id},this)">
         <span class="nav-item-label">${esc(s.title||cleanName(s.filename))}
           <span style="color:var(--muted2);font-size:9.5px">— ${esc(s.artist||'?')}</span></span>
       </div>`;
@@ -3511,19 +4441,32 @@ function pickToSong(id, el){
   el.classList.add('active');
 }
 
-// Typing a text-only target deselects the picked library target
-function onTransitionTextInput(){
-  if(document.getElementById('atText')?.value.trim()){
-    pendingTransitionToId=null;
-    document.querySelectorAll('#atSongList .nav-item').forEach(n=>n.classList.remove('active'));
+// Library pick for the mashup INPUT song (clears the typed-text field).
+function pickMashupInputSong(id, el){
+  window._pendingMashupInputId=id;
+  document.querySelectorAll('#atMiList .nav-item').forEach(n=>n.classList.remove('active'));
+  el.classList.add('active');
+  const txt=document.getElementById('atMiText');
+  if(txt) txt.value='';
+}
+
+// Typing a text-only input deselects the picked library input song.
+function onMashupInputTextInput(){
+  if(document.getElementById('atMiText')?.value.trim()){
+    window._pendingMashupInputId=null;
+    document.querySelectorAll('#atMiList .nav-item').forEach(n=>n.classList.remove('active'));
   }
 }
 
 async function confirmAddTransition(){
+  const isMashup=!!document.getElementById('atMiText');   // only exists in mashup mode
   if(!pendingTransitionFromId){ alert('Pick the source song first.'); return; }
   const toSong=pendingTransitionToId;
   const toText=document.getElementById('atText')?.value.trim();
   if(!toSong&&!toText){ alert('Pick a target song or enter a track name.'); return; }
+  const miSong=window._pendingMashupInputId;
+  const miText=document.getElementById('atMiText')?.value.trim();
+  if(isMashup && !miSong && !miText){ alert('Pick an input song for the mashup, or enter its name.'); return; }
   const notes=document.getElementById('atNotes')?.value.trim();
   const tag=document.getElementById('atTag')?.value.trim();
   const toTry=document.getElementById('atToTry')?.checked||false;
@@ -3531,20 +4474,27 @@ async function confirmAddTransition(){
   const folder_id=folderEl&&folderEl.value ? parseInt(folderEl.value,10) : null;
   const resp=await fetch(`/api/songs/${pendingTransitionFromId}/transitions`,{method:'POST',
     headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({to_song_id:toSong||undefined,to_text:toText||undefined,notes,tag,
-      status:toTry?'to_try':'confirmed',folder_id})});
+    body:JSON.stringify({to_song_id:toSong||undefined,to_text:toText||undefined,
+      is_mashup_track:isMashup||undefined,
+      mashup_input_song_id:isMashup?(miSong||undefined):undefined,
+      mashup_input_text:isMashup&&!miSong?(miText||undefined):undefined,
+      notes,tag,status:toTry?'to_try':'confirmed',folder_id})});
   const data=await resp.json();
   if(data.error){ alert(data.error); return; }
+  fetchTransitionTags(true);          // a new tag becomes a suggestion for the next one
   closeAddTransitionModal();
   refreshTransTryBadge();
   if(currentSong && document.getElementById('infoModal').classList.contains('open'))
     renderTransitionsSection(currentSong.id);
   if(document.getElementById('tab-transitions').classList.contains('active')) renderTransitionTab();
+  if(document.getElementById('tab-mashups').classList.contains('active')) renderMashupsTab();
+  if(isMashup) toast('⇄ Mashup added');
 }
 
 function closeAddTransitionModal(){
   document.getElementById('addTransitionModal').classList.remove('open');
   pendingTransitionFromId=null; pendingTransitionToId=null;
+  window._pendingMashupInputId=null;
 }
 
 // -- TRANSITIONS → MIXXX COMMENTS -------------------------------------------
@@ -3584,6 +4534,7 @@ async function exportTransitionsCsv(){
 // Downloads the standard rekordbox.xml that Rekordbox and Serato DJ Pro import
 // natively (File -> Import). BPM, Camelot key, crates and transition notes
 // all travel in the file.
+
 function downloadBlob(url, filename){
   fetch(url).then(r=>{
     if(!r.ok) throw new Error('HTTP '+r.status);
@@ -3597,6 +4548,26 @@ function downloadBlob(url, filename){
 }
 function exportRekordboxXml(){ downloadBlob('/api/export/rekordbox-xml','rekordbox.xml'); }
 function exportCrateXml(id){ downloadBlob('/api/export/rekordbox-xml?crate_id='+id,'crate.xml'); }
+// Rewrites the always-current on-disk file instead of downloading a copy: the
+// backend already rewrites it after every change, so this just forces it now
+// and reports the path. The downloaded-copy route stays for moving files to
+// another computer.
+async function refreshRekordboxLiveFile(){
+  try{
+    const r=await fetch('/api/export/rekordbox-refresh',{method:'POST'});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const d=await r.json();
+    if(d.exists===false){
+      alert('Could not write the live file at '+d.path+'\n\nCheck the path in ⚙ Settings → Rekordbox export file.');
+      return;
+    }
+    // The full path is already shown in the live hint; keep the toast short.
+    const dir=(d.path||'').split('/').slice(0,-1).join('/')||d.path;
+    toast((d.written?'✅ rekordbox.xml written — ':'✓ rekordbox.xml already up to date — ')+dir);
+    const hint=document.getElementById('rekordboxLiveHint');
+    if(hint) hint.textContent='🔄 Live file (auto-updated on every change): '+d.path;
+  }catch(e){ alert('Refresh failed: '+e.message); }
+}
 
 // -- TRANSITIONS SIDEBAR TAB -------------------------------------------------
 // All links grouped by source song, newest first, with jump-to-song and delete.
@@ -3628,6 +4599,116 @@ function populateTransitionFolderSelect(selId, selectedId, allLabel){
   if(!sel) return;
   sel.innerHTML=`<option value="">${esc(allLabel||'No folder')}</option>
     ${transFolders.map(f=>`<option value="${f.id}" ${selectedId===f.id?'selected':''}>📁 ${esc(f.name)}</option>`).join('')}`;
+}
+
+// -- TRANSITION TAG COMBOBOX -------------------------------------------------
+// Tags on transitions are freeform, but reusing the ones you already have keeps
+// them consistent. This shared input suggests the tags already in use as you
+// type (most-used first, matching text highlighted) and offers an explicit
+// green "Create" row for something new — picking it just keeps what you typed,
+// and the tag is stored on the transition when you save.
+let transTags = [];        // [{tag, count}] from /api/transition-tags
+
+async function fetchTransitionTags(force){
+  if(transTags.length && !force) return transTags;
+  try{ transTags = await (await fetch('/api/transition-tags')).json(); }
+  catch(e){ transTags = []; }
+  return transTags;
+}
+
+// The tag input plus its suggestion menu. `inputStyle` keeps each caller's
+// width so the two call sites look unchanged.
+function tagComboHtml(id, value, inputStyle){
+  return `<span class="tag-combo">
+    <input class="ii tag-input" id="${id}" value="${esc(value||'')}"
+      placeholder="Tag (e.g. energy +1)" title="Tag this transition — existing tags autocomplete, or type a new one to create it"
+      autocomplete="off" spellcheck="false" style="${inputStyle||'width:130px'}"
+      role="combobox" aria-expanded="false" aria-autocomplete="list" aria-haspopup="listbox"
+      oninput="tagComboInput(event)" onfocus="tagComboInput(event)"
+      onkeydown="tagComboKey(event)" onblur="tagComboBlur(event)">
+    <div class="tag-menu" role="listbox" hidden></div>
+  </span>`;
+}
+
+function tagComboMenu(input){ return input && input.closest('.tag-combo')?.querySelector('.tag-menu'); }
+
+// Escapes a tag and wraps the part matching what was typed, for the highlight.
+function tagComboHighlight(tag, q){
+  if(!q) return esc(tag);
+  const i = tag.toLowerCase().indexOf(q);
+  if(i < 0) return esc(tag);
+  return esc(tag.slice(0,i)) + '<mark>' + esc(tag.slice(i, i+q.length)) + '</mark>'
+       + esc(tag.slice(i + q.length));
+}
+
+// Rebuilds the menu for the input's current value.
+function tagComboInput(event){
+  const input = event.target;
+  const menu  = tagComboMenu(input);
+  if(!menu) return;
+  const q  = input.value.trim();
+  const ql = q.toLowerCase();
+  const matches = transTags.filter(t=>!ql || t.tag.toLowerCase().includes(ql)).slice(0, 40);
+  const exact   = transTags.some(t=>t.tag.toLowerCase() === ql);
+  let html = matches.map(t=>`<button type="button" class="tag-opt" role="option"
+      data-value="${esc(t.tag)}" onmousedown="tagComboPick(event,this)">
+      <span class="tag-opt-name">${tagComboHighlight(t.tag, ql)}</span>
+      <span class="tag-opt-count">${t.count}</span></button>`).join('');
+  if(q && !exact){
+    html += `<button type="button" class="tag-opt create" role="option"
+      data-value="${esc(q)}" onmousedown="tagComboPick(event,this)">
+      <span class="tag-opt-name">Create \u201c${esc(q)}\u201d</span>
+      <span class="tag-opt-hint">new tag</span></button>`;
+  }
+  menu.innerHTML = html;
+  menu.hidden = !html;
+  input.setAttribute('aria-expanded', html ? 'true' : 'false');
+}
+
+function tagComboCloseEl(input){
+  const menu = tagComboMenu(input);
+  if(menu){ menu.hidden = true; menu.innerHTML = ''; }
+  if(input) input.setAttribute('aria-expanded', 'false');
+}
+
+// A suggestion (or the Create row) was chosen. The value is already the tag
+// text, so for Create this simply keeps what the user typed.
+function tagComboPick(event, el){
+  event.preventDefault();                 // keep focus — don't blur before the click lands
+  const input = el.closest('.tag-combo').querySelector('.tag-input');
+  input.value = el.dataset.value;
+  tagComboCloseEl(input);
+  input.focus();
+}
+
+function tagComboBlur(event){
+  const input = event.target;
+  // Let a click or Enter on a suggestion register before tearing the menu down.
+  setTimeout(()=>tagComboCloseEl(input), 140);
+}
+
+function tagComboKey(event){
+  const input = event.target;
+  const menu  = tagComboMenu(input);
+  if(!menu) return;
+  const opts = [...menu.querySelectorAll('.tag-opt')];
+  const open = !menu.hidden && opts.length > 0;
+  if(event.key === 'ArrowDown' || event.key === 'ArrowUp'){
+    if(!open){ tagComboInput({target:input}); return; }
+    event.preventDefault();
+    let i = opts.findIndex(o=>o.classList.contains('active'));
+    i = event.key === 'ArrowDown' ? (i+1) % opts.length : (i-1+opts.length) % opts.length;
+    opts.forEach(o=>o.classList.remove('active'));
+    opts[i].classList.add('active');
+    opts[i].scrollIntoView({block:'nearest'});
+  }else if(event.key === 'Enter' && open){
+    const active = opts.find(o=>o.classList.contains('active')) || opts[0];
+    if(active){ event.preventDefault(); tagComboPick(event, active); }
+  }else if(event.key === 'Escape' && open){
+    event.preventDefault(); tagComboCloseEl(input);
+  }else if(event.key === 'Tab'){
+    tagComboCloseEl(input);
+  }
 }
 
 // The folder chips row above the transition groups. Includes a virtual
@@ -3682,7 +4763,10 @@ async function renderTransitionTab(){
         const target=t.to_song_id
           ? `<span class="ts-tab-target" title="Jump to this song" onclick="jumpToSong(${t.to_song_id})">${esc(t.to_title||t.to_filename||'?')}</span>`
           : `<span class="ts-tab-target noclick" title="Not in your library">${esc(t.to_text||'Untitled track')}</span>`;
-        return `<div class="ts-tab-row"><span class="ts-arrow">→</span>${target}
+        const mashPrefix = t.is_mashup_track
+          ? `<span class="ts-mash">⇄</span> <span style="color:var(--green);font-size:9.5px">in: ${esc(t.mashup_input_song_id?(t.mi_title||'?'):(t.mashup_input_text||'?'))}</span> → `
+          : '';
+        return `<div class="ts-tab-row"><span class="ts-arrow">→</span>${mashPrefix}${target}
           ${t.tag?`<span class="ts-tag">${esc(t.tag)}</span>`:''}
           ${t.status==='to_try'?`<button class="ts-act" title="Commit — mark this transition as tested and working" onclick="confirmTransition(${t.id})">✓</button>`:''}
           <button class="nav-item-del" title="Delete transition" onclick="deleteTransition(${t.id})">✕</button>
@@ -3700,6 +4784,61 @@ async function renderTransitionTab(){
     <div class="ts-group-label" style="padding:6px 6px 2px">🧪 Transitions to try (${toTry.length})</div>
     ${toTryHtml}
     <div class="ts-group-label" style="padding:10px 6px 2px">✓ Confirmed transitions (${confirmed.length})</div>
+    ${confirmedHtml}`;
+}
+
+// -- MASHUPS SIDEBAR TAB -----------------------------------------------------
+// Every mashup row (is_mashup_track=1) grouped by the mashup song itself:
+// in → what it blends in from, out → where it lands. Both may be library
+// songs (clickable, jump to them) or typed names (italic, "not in library").
+async function renderMashupsTab(){
+  const list=document.getElementById('mashupList');
+  if(!list) return;
+  let mashups=[];
+  try{
+    mashups=await (await fetch('/api/mashups')).json();
+  }catch(e){ list.innerHTML='<div class="ts-empty" style="padding:10px 6px">Could not load mashups.</div>'; return; }
+  updateTransTryBadge(mashups);
+  if(!mashups.length){
+    list.innerHTML='<div class="ts-empty" style="padding:10px 6px">No mashups yet. Open a song\'s info (right-click it) and hit “⇄ Mashup”.</div>';
+    return;
+  }
+  const renderGroup=(entries)=>Object.entries(entries).map(([sid,ts])=>{ const src=ts[0]; return `
+    <div class="ts-tab-group">
+      <div class="ts-tab-src" title="Jump to this mashup" onclick="jumpToSong(${sid})">
+        <span class="nav-item-label">${esc(src.from_title||src.from_filename||'?')} — ${esc(src.from_artist||'?')}</span>
+        <span class="ts-tab-count">${ts.length}</span>
+      </div>
+      ${ts.map(t=>{
+        const inName = t.mashup_input_song_id
+          ? `<span class="ts-tab-target" title="Jump to this song" onclick="jumpToSong(${t.mashup_input_song_id})">${esc(t.mi_title||'?')} — ${esc(t.mi_artist||'?')}</span>`
+          : `<span class="ts-tab-target noclick" title="Not in your library">${esc(t.mashup_input_text||'?')}</span>`;
+        const outName = t.to_song_id
+          ? `<span class="ts-tab-target" title="Jump to this song" onclick="jumpToSong(${t.to_song_id})">${esc(t.to_title||t.to_filename||'?')} — ${esc(t.to_artist||'?')}</span>`
+          : `<span class="ts-tab-target noclick" title="Not in your library">${esc(t.to_text||'Untitled track')}</span>`;
+        return `<div class="ts-tab-row">
+          <span class="ts-arrow" style="color:var(--green)">in:</span>${inName}
+          ${t.status==='to_try'?`<button class="ts-act" title="Commit — mark this mashup as tested and working" onclick="confirmTransition(${t.id})">✓</button>`:''}
+          <button class="nav-item-del" title="Delete mashup" onclick="deleteTransition(${t.id})">✕</button>
+        </div>
+        <div class="ts-tab-row">
+          <span class="ts-arrow" style="color:var(--green)">out:</span>${outName}
+        </div>`;
+      }).join('')}
+    </div>`;
+  }).join('');
+  const toTry=mashups.filter(t=>t.status==='to_try');
+  const confirmed=mashups.filter(t=>t.status!=='to_try');
+  const toTryHtml = toTry.length
+    ? renderGroup(toTry.reduce((g,t)=>{ (g[t.from_song_id]=g[t.from_song_id]||[]).push(t); return g; },{}))
+    : '<div class="ts-empty" style="padding:4px 6px">Nothing queued — add a mashup with “Mark as to-try”.</div>';
+  const confirmedHtml = confirmed.length
+    ? renderGroup(confirmed.reduce((g,t)=>{ (g[t.from_song_id]=g[t.from_song_id]||[]).push(t); return g; },{}))
+    : '<div class="ts-empty" style="padding:4px 6px">No confirmed mashups yet.</div>';
+  list.innerHTML=`
+    <div class="ts-group-label" style="padding:6px 6px 2px">🧪 Mashups to try (${toTry.length})</div>
+    ${toTryHtml}
+    <div class="ts-group-label" style="padding:10px 6px 2px">✓ Confirmed mashups (${confirmed.length})</div>
     ${confirmedHtml}`;
 }
 
@@ -3817,6 +4956,7 @@ async function confirmTransition(id){
   refreshTransTryBadge();
   if(currentSong) renderTransitionsSection(currentSong.id);
   renderTransitionTab();
+  if(document.getElementById('tab-mashups')?.classList.contains('active')) renderMashupsTab();
 }
 
 
@@ -3824,6 +4964,7 @@ async function confirmTransition(id){
 async function jumpToSong(id){
   closeInfoModal();
   document.getElementById('addTransitionModal').classList.remove('open');
+  document.getElementById('songPickerModal')?.classList.remove('open');
   currentCrate=null; currentFolder=null;
   showTab('library');
   document.querySelectorAll('.nav-item').forEach(e=>e.classList.remove('active'));
@@ -4280,6 +5421,9 @@ async function rescan(){
   const resp=await fetch('/api/scan',{method:'POST'});
   const data=await resp.json();
   await loadSongs(currentCrate);await checkDuplicates();
+  // A scan can auto-start the genre sweep ("Sweep genres after scans"); refresh
+  // the card now so it shows the run and starts polling it.
+  refreshGenreBackfill();
   let msg=`Scan complete — ${data.scanned} new files added.`;
   if(data.purged) msg+=`\n${data.purged} missing file(s) removed from the library.`;
   alert(msg);
@@ -4343,9 +5487,11 @@ function closeOpenModal(id){
   else if(id==='dupeModal') closeDupeModal();
   else if(id==='addToCrateModal') closeAddToCrateModal();
   else if(id==='addTransitionModal') closeAddTransitionModal();
+  else if(id==='songPickerModal') closeSongPicker();
   else if(id==='mergeModal') closeMergeModal();
   else if(id==='mergePickerModal') closeMergePicker();
   else if(id==='folderPickerModal') closeFolderPicker();
+  else if(id==='newLibModal') closeNewLibModal();
   else if(id==='cleanupModal') closeMetadataCleanup();
   else if(id==='introModal') closeIntroGuide();
   else closeCrateModal();
@@ -4361,12 +5507,19 @@ function primaryButtonFor(modalId){
   if(modalId==='addToCrateModal'){
     return m.querySelector('#addToCrateBody .nav-item')||null;
   }
+  if(modalId==='cleanupModal'){
+    // Enter triggers the batch action that is actually visible (Accept all
+    // hides while the history list is open, and vice versa for Reject all).
+    const vis = id => { const b=m.querySelector(id); return (b && b.style.display!=='none' && !b.disabled) ? b : null; };
+    return vis('#cleanupApplyBtn') || vis('#cleanupRejectBtn');
+  }
   const sels={
     infoModal:'.btn-save',
     crateModal:'.btn-save',
     addTransitionModal:'.btn-save',
     introModal:'.btn-save',
     folderPickerModal:'#folderUseBtn',
+    newLibModal:'#newLibGo',
     mergePickerModal:'#mergePickGo',
     mergeModal:'.btn-save',
     cleanupModal:'#cleanupApplyBtn',
@@ -4378,7 +5531,7 @@ function primaryButtonFor(modalId){
   return (b&&!b.disabled)?b:null;
 }
 
-['infoModal','dupeModal','crateModal','addToCrateModal','addTransitionModal','mergeModal','mergePickerModal','folderPickerModal','cleanupModal'].forEach(id=>{
+['infoModal','dupeModal','crateModal','addToCrateModal','addTransitionModal','songPickerModal','mergeModal','mergePickerModal','folderPickerModal','newLibModal','cleanupModal'].forEach(id=>{
   document.getElementById(id).addEventListener('click',e=>{
     if(e.target===e.currentTarget){
       closeOpenModal(id);
@@ -4435,51 +5588,75 @@ async function spotifyLogout() {
 // Scans tracks with missing artist/genre, matches each against Spotify, and
 // shows a review-the-diff list. Nothing touches the files until the user
 // checks rows and hits Apply — each apply is one POST that writes ID3 + DB.
+// ── METADATA CLEANUP ─────────────────────────────────────────────────────
+// Scans tracks with missing artist/genre, matches each against Spotify, and
+// shows a merge-panel-style review list: every row has Accept / Reject / Edit
+// buttons instead of a checkbox. Accepting writes the tags (after any edits
+// the user made), rejecting keeps the track as-is — both mark the song as
+// decided so it never shows up twice.
 let cleanupProposals = [];
 let cleanupScanAbort = false;
 let cleanupScanning = false;
 let cleanupScanError = null;
 let cleanupScannedIds = [];
+// song_id -> partially-edited proposal fields (from the inline Edit form).
+let cleanupEdits = new Map();
+let cleanupEditingId = null;   // proposal row with its edit form open
+let cleanupBusy = false;       // a per-row accept/reject request is in flight
+// Genre-fill mode reuses this same review panel, but it proposes and writes
+// only genres and records no cleanup decision, so it never blocks a later full
+// metadata cleanup. See startGenreFill().
+let cleanupGenreOnly = false;
 
 // Minimum match confidence shown in the review list (low = show everything).
 const CLEANUP_CONF_RANK = { low: 0, medium: 1, high: 2 };
+// Two memories of the same choice: the metadata cleanup keeps its own, and a
+// genre fill starts at 'high' (the safe default) until you lower it. Both use
+// the identical Low/Med/High pills.
 let cleanupMinConfidence = 'low';
+let genreMinConfidence = 'high';
 try{ const c = localStorage.getItem('djlib_cleanup_conf');
      if (c in CLEANUP_CONF_RANK) cleanupMinConfidence = c; }catch(e){}
+try{ const c = localStorage.getItem('djlib_cleanup_genre_conf');
+     if (c in CLEANUP_CONF_RANK) genreMinConfidence = c; }catch(e){}
+
+// The threshold in force for whichever review is open right now.
+function activeCleanupConfidence(){
+  return cleanupGenreOnly ? genreMinConfidence : cleanupMinConfidence;
+}
 
 function setCleanupConfidence(level){
   if (!(level in CLEANUP_CONF_RANK)) return;
-  cleanupMinConfidence = level;
-  try{ localStorage.setItem('djlib_cleanup_conf', level); }catch(e){}
+  if (cleanupGenreOnly){
+    genreMinConfidence = level;
+    try{ localStorage.setItem('djlib_cleanup_genre_conf', level); }catch(e){}
+  } else {
+    cleanupMinConfidence = level;
+    try{ localStorage.setItem('djlib_cleanup_conf', level); }catch(e){}
+  }
   renderCleanupConfPills();
   renderCleanupReview();
 }
 
 // Shared Low/Med/High pill row — shown both in the Tools tab (before scanning)
-// and in the review modal.
-function cleanupConfPill(lvl){
-  return `<button class="sw-pill${cleanupMinConfidence===lvl?' active':''}"
+// and in the review modal. `current` is the threshold the row represents, so
+// the sidebar row and the modal row never light up the wrong pill.
+function cleanupConfPill(lvl, current){
+  return `<button class="sw-pill${current===lvl?' active':''}"
     onclick="setCleanupConfidence('${lvl}')">${lvl === 'medium' ? 'Med' : lvl[0].toUpperCase() + lvl.slice(1)}</button>`;
 }
 function renderCleanupConfPills(){
   const el = document.getElementById('cleanupConfPills');
-  if (el) el.innerHTML = cleanupConfPill('low') + cleanupConfPill('medium') + cleanupConfPill('high');
+  if (el) el.innerHTML = cleanupConfPill('low',cleanupMinConfidence)
+    + cleanupConfPill('medium',cleanupMinConfidence)
+    + cleanupConfPill('high',cleanupMinConfidence);
 }
-
-let cleanupReviewShown = false;
 
 function openCleanupModal(){ document.getElementById('cleanupModal').classList.add('open'); }
 
-// The proposal checkboxes currently rendered in the review panel.
-function cuVisibleRows(){
-  const rows = [];
-  document.querySelectorAll('#cleanupModalBody .cu-row input[type=checkbox]').forEach(cb => {
-    const m = cb.id.match(/^cu-chk-(\d+)$/);
-    if (m) rows.push({ id: +m[1], checked: cb.checked });
-  });
-  return rows;
-}
-
+// The user saw a proposal and dismissed the panel without deciding it —
+// remember it as 'skipped' so the session's local scan bookkeeping matches.
+// Unlike a real Reject it is not a final decision; the track comes back.
 function markCleanupDecision(ids, decision){
   if(!ids.length) return;
   // Update the in-memory copies immediately — otherwise the next scan in this
@@ -4497,15 +5674,20 @@ function markCleanupDecision(ids, decision){
     body: JSON.stringify({ ids, decision }) }).catch(()=>{});
 }
 
+// Mirror one server-written decision (apply / reject) into the local copy of
+// the song so hints and filters stay in sync without a full reload.
+function syncCleanupSong(songId, decision){
+  const s = allSongs.find(x => x.id === songId);
+  if(!s) return;
+  s.cleanup_scanned_at = new Date().toISOString();
+  s.cleanup_decision = decision;
+  updateCleanupHint();
+}
+
 function closeMetadataCleanup(){
-  // Rows the user saw and left unchecked are a decision — "keep my tags" —
-  // so they're remembered and never re-proposed. Checked-but-cancelled rows
-  // and rows hidden by the threshold stay undecided and will come back.
-  if(cleanupReviewShown){
-    markCleanupDecision(cuVisibleRows().filter(r => !r.checked).map(r => r.id), 'skipped');
-    cleanupReviewShown = false;
-  }
   cleanupScanAbort = true;
+  cleanupEditingId = null;
+  cleanupGenreOnly = false;
   document.getElementById('cleanupModal').classList.remove('open');
 }
 // Backdrop click closes (same pattern as the other modals).
@@ -4514,13 +5696,22 @@ document.getElementById('cleanupModal').addEventListener('click', e=>{
 });
 
 // Ends a scan (completed, cancelled, or stopped on a config error). Tracks
-// where Spotify had nothing are decided without a panel ('no_match'); tracks
-// with a proposal wait for the user's check/uncheck in the review panel.
-function finishCleanupScan(){
+// where Spotify had nothing are decided server-side ('no_match') so they
+// don't come back; tracks with a proposal wait for the user's per-row
+// Accept / Reject decision.
+function finishCleanupScan() {
   cleanupScanning = false;
-  const proposed = new Set(cleanupProposals.map(p => p.song_id));
-  const noMatch = cleanupScannedIds.filter(id => !proposed.has(id));
-  markCleanupDecision(noMatch, 'no_match');
+  // Genre fill deliberately leaves no decisions behind: it only writes the
+  // genres you Accept, so every track here stays visible to a later full
+  // metadata cleanup (which may still fix its title/artist).
+  if(!cleanupGenreOnly){
+    const proposed = new Set(cleanupProposals.map(p => p.song_id));
+    const noMatch = cleanupScannedIds.filter(id => !proposed.has(id));
+    if(noMatch.length){
+      markCleanupDecision(noMatch, 'no_match');
+    }
+  }
+  cleanupBusy = false;
 }
 
 function cleanupSkipScanned(){
@@ -4536,6 +5727,126 @@ function cleanupTargets(){
   let targets = allSongs.filter(s => !s.artist || !s.genre);
   if (cleanupSkipScanned()) targets = targets.filter(s => !s.cleanup_scanned_at);
   return targets;
+}
+
+// Tracks a genre fill can help: every one with no genre. It deliberately
+// ignores the "only scan tracks never scanned" filter -- that setting is about
+// full metadata decisions, and a genre fill records none (it only writes
+// genres you Accept, and never overwrites one).
+function cleanupGenreTargets(){
+  return allSongs.filter(s => !s.genre);
+}
+
+// One-click "fill missing genres for the whole library": scan every track with
+// no genre, keep the Spotify matches that resolved to a genre, and show them in
+// the review panel -- nothing is written until you Accept. The Min-confidence
+// pills work exactly like the metadata cleanup's (and start at high).
+async function startGenreFill(){
+  if(cleanupScanning){ return; }
+  if(!allSongs.length){ alert('Load the library first.'); return; }
+  const targets = cleanupGenreTargets();
+  if(!targets.length){ alert('Every track already has a genre. ✨'); return; }
+  await startMetadataCleanup(targets, false, true);
+}
+
+// ── BACKGROUND GENRE BACKFILL ─────────────────────────────────────────────────
+// The unattended whole-library version of the genre fill: a server-side worker
+// looks up every track with no genre, paced under Discogs' rate limit, and the
+// UI only mirrors its progress (it never drives the job). The job is resumable,
+// so closing the panel or the app does not lose the work already done.
+let bgPollTimer = null;
+let lastBgStatus = null;
+
+function fmtEta(seconds){
+  if(!seconds || seconds < 1) return '';
+  const m = Math.round(seconds / 60);
+  if(m < 1) return 'under a minute';
+  if(m < 60) return `~${m} min`;
+  return `~${Math.floor(m/60)}h ${m%60}m`;
+}
+
+function startBgPoll(){
+  if(bgPollTimer) return;
+  bgPollTimer = setInterval(refreshGenreBackfill, 1500);
+}
+function stopBgPoll(){
+  if(bgPollTimer){ clearInterval(bgPollTimer); bgPollTimer = null; }
+}
+
+function renderGenreBackfill(st){
+  const card = document.getElementById('genreBackfillCard');
+  if(!card) return;
+  const start = document.getElementById('bgStart');
+  const cancel = document.getElementById('bgCancel');
+  const bar = document.getElementById('bgBar');
+  const text = document.getElementById('bgText');
+  const active = st.status === 'running' || st.cancelling;
+  const pct = st.total ? Math.min(100, Math.round(st.attempted / st.total * 100)) : 0;
+  bar.style.width = pct + '%';
+  bar.classList.toggle('done', st.status === 'done');
+  bar.classList.toggle('err', st.status === 'error');
+  start.style.display = active ? 'none' : '';
+  start.disabled = false;
+  cancel.style.display = st.running ? '' : 'none';
+  cancel.disabled = !!st.cancelling;
+  const eta = fmtEta(st.eta_seconds);
+  if(st.cancelling){
+    text.innerHTML = `Stopping after the current track… ${st.remaining} left. `
+      + `<b style="color:var(--text2)">Start</b> again to resume.`;
+  } else if(st.status === 'running'){
+    text.innerHTML = `Looking up <b style="color:var(--text2)">${st.attempted} / ${st.total}</b> · `
+      + `<b style="color:var(--green)">${st.filled}</b> filled · ${st.remaining} left`
+      + (eta ? ` · up to ${eta} to go` : '')
+      + `<br><span style="color:var(--muted)">${esc(st.current_title || '…')}</span>`;
+  } else if(st.status === 'done'){
+    text.innerHTML = `Finished ✨ <b style="color:var(--green)">${st.filled}</b> of ${st.attempted} `
+      + `track${st.attempted===1?'':'s'} looked up got a genre.`
+      + (st.remaining ? ` ${st.remaining} still without one.` : '');
+  } else if(st.status === 'cancelled'){
+    text.innerHTML = `Paused — ${st.filled} filled, <b style="color:var(--text2)">${st.remaining}</b> left. `
+      + `Start again to pick up where it stopped.`;
+  } else if(st.status === 'error'){
+    text.innerHTML = `Stopped: ${esc(st.error || 'unexpected error')}. ${st.remaining} left — `
+      + `<b style="color:var(--text2)">Start</b> to resume.`;
+  } else {
+    text.innerHTML = st.remaining
+      ? `${st.remaining} track${st.remaining===1?'':'s'} with no genre · paced at ${st.requests_per_minute}/min`
+        + (st.discogs_token ? '' : ' (add a free Discogs token in config.json to go faster)')
+        + (eta ? ` · up to ${eta} to finish.` : '.') + ' Safe to cancel or close the app — it resumes.'
+      : 'Every track already has a genre ✨';
+  }
+  if(st.running) startBgPoll(); else stopBgPoll();
+}
+
+async function refreshGenreBackfill(){
+  try{
+    const r = await fetch('/api/genre-backfill');
+    const st = await r.json();
+    const prev = lastBgStatus;
+    lastBgStatus = st.status;
+    renderGenreBackfill(st);
+    // A run just ended: pull the genres it wrote into the list and hints.
+    if(prev === 'running' && !st.running){
+      await loadSongs(currentCrate);
+    }
+  }catch(e){ stopBgPoll(); }
+}
+
+async function startGenreBackfill(){
+  const start = document.getElementById('bgStart');
+  if(start) start.disabled = true;
+  try{ await fetch('/api/genre-backfill/start', { method:'POST' }); }catch(e){}
+  // Poll immediately, whether it started fresh or resumed.
+  lastBgStatus = 'running';
+  refreshGenreBackfill();
+  startBgPoll();
+}
+
+async function cancelGenreBackfill(){
+  const cancel = document.getElementById('bgCancel');
+  if(cancel) cancel.disabled = true;
+  try{ await fetch('/api/genre-backfill/cancel', { method:'POST' }); }catch(e){}
+  refreshGenreBackfill();
 }
 
 // ── SCAN SELECTED (right-click menu) ─────────────────────────────────────────
@@ -4578,7 +5889,7 @@ function scanSelected(scanEverything){
     if(already && !confirm(
       `Rescan ${sel.length} selected track(s), including ${already} already scanned?\n\n` +
       `Fixes you previously kept-as-is may be proposed again.`)) return;
-    startMetadataCleanup(sel);
+    startMetadataCleanup(sel, true);   // rescan = force a fresh Spotify lookup
   } else {
     const fresh = sel.filter(s => !s.cleanup_scanned_at);
     if(!fresh.length){
@@ -4601,7 +5912,13 @@ function updateCleanupHint(){
   const missing = allSongs.filter(s => !s.artist || !s.genre);
   const todo = cleanupSkipScanned() ? missing.filter(s => !s.cleanup_scanned_at) : missing;
   const applied = allSongs.filter(s => s.cleanup_decision === 'applied').length;
-  const kept = allSongs.filter(s => s.cleanup_decision === 'skipped').length;
+  const kept = allSongs.filter(s => s.cleanup_decision === 'rejected').length;
+  const noGenre = allSongs.filter(s => !s.genre).length;
+  const gh = document.getElementById('genreFillHint');
+  if(gh) gh.textContent = !allSongs.length ? ''
+    : noGenre
+      ? `${noGenre} track${noGenre===1?'':'s'} with no genre. Looked up on Discogs, then MusicBrainz, then Spotify — you accept each one.`
+      : 'Every track already has a genre ✨';
   const el = document.getElementById('cleanupHint');
   if(el) el.textContent =
     `${todo.length} track${todo.length===1?'':'s'} to scan` +
@@ -4611,14 +5928,17 @@ function updateCleanupHint(){
     (todo.length === 0 && missing.length ? ' Uncheck the toggle above to rescan everything.' : '');
 }
 
-async function startMetadataCleanup(explicitTargets){
+async function startMetadataCleanup(explicitTargets, forceRefresh, genreOnly){
   if(cleanupScanning) return;
   if(!allSongs.length){ alert('Load the library first.'); return; }
+  cleanupGenreOnly = !!genreOnly;
   // Explicit list = "scan selected" from the right-click menu; the caller has
   // already handled warnings and the never-scanned filter.
-  const targets = Array.isArray(explicitTargets) ? explicitTargets : cleanupTargets();
+  const targets = Array.isArray(explicitTargets) ? explicitTargets
+    : (cleanupGenreOnly ? cleanupGenreTargets() : cleanupTargets());
   if(!targets.length){
     if(Array.isArray(explicitTargets)){ alert('Nothing to scan in the selection.'); return; }
+    if(cleanupGenreOnly){ alert('Every track already has a genre. ✨'); return; }
     const missing = allSongs.filter(s => !s.artist || !s.genre).length;
     alert(missing
       ? 'Every track has already been scanned — nothing new to check.\nUncheck “Only scan tracks never scanned” to rescan everything.'
@@ -4628,68 +5948,158 @@ async function startMetadataCleanup(explicitTargets){
   cleanupProposals = [];
   cleanupScanError = null;
   cleanupScannedIds = [];
-  cleanupReviewShown = false;
+  cleanupEdits.clear();
+  cleanupEditingId = null;
+  cleanupBusy = false;
   cleanupScanAbort = false;
   cleanupScanning = true;
   document.getElementById('cleanupApplyBtn').style.display = 'none';
+  document.getElementById('cleanupRejectBtn').style.display = 'none';
   document.getElementById('cleanupApplyStatus').textContent = '';
+  const titleEl = document.getElementById('cleanupModalTitle');
+  if(titleEl) titleEl.textContent = cleanupGenreOnly ? '♪ Fill missing genres' : '✨ Clean up metadata';
   openCleanupModal();
   const body = document.getElementById('cleanupModalBody');
+  const scanLabel = cleanupGenreOnly ? 'Finding genres (Discogs → MusicBrainz → Spotify)…' : 'Matching on Spotify…';
   for(let i = 0; i < targets.length; i++){
     if(cleanupScanAbort){ finishCleanupScan(); return; }
     const s = targets[i];
     body.innerHTML = `<div class="empty" style="padding:40px 0"><div class="empty-icon">✨</div>
-      <div>Matching on Spotify… ${i+1} / ${targets.length}</div>
+      <div>${scanLabel} ${i+1} / ${targets.length}</div>
       <div style="font-size:11px;color:var(--muted)">${esc(s.title || s.filename)}</div>
       <div style="font-size:10px;color:var(--muted2);margin-top:6px">Close this window to stop early</div></div>`;
     try{
-      const r = await fetch(`/api/cleanup/match/${s.id}`);
+      // Stored proposals are reused for undecided tracks so re-opening the
+      // panel is instant; an explicit rescan asks Spotify for fresh matches.
+      const r = await fetch(`/api/cleanup/match/${s.id}${forceRefresh?'?refresh=1':''}`);
       const d = await r.json();
       // A config problem should say what to do, not masquerade as "no matches".
       if(r.status === 400 && d.error){ cleanupScanError = d.error; break; }
-      if(d && d.found) cleanupProposals.push(d);
+      // Genre mode proposes anything it could actually write -- a match that
+      // resolved to a genre. The confidence threshold is chosen in the review
+      // (the same Low/Med/High pills as the metadata cleanup), so weaker
+      // matches are kept here and filtered there instead of being dropped.
+      if(d && d.found && (!cleanupGenreOnly || d.genre))
+        cleanupProposals.push(d);
     }catch(e){}
     cleanupScannedIds.push(s.id);
     await new Promise(r=>setTimeout(r,120));   // gentle on the Spotify API
   }
   finishCleanupScan();
   renderCleanupReview();
+  updateCleanupHint();
 }
 
+function cuEditRow(k, p){
+  const listAttr = k === 'genre' ? ' list="genreEditList"' : '';
+  return `
+    <div class="cu-k">${k}</div>
+    <input class="ii" id="cu-ed-${k}" value="${esc(String(p[k]||''))}"
+      placeholder="${k==='year' ? 'Year' : '—'}"${listAttr}>`;
+}
+
+// One proposal row, merge-panel style: proposed tags with an Accept / Reject /
+// Edit button group instead of a checkbox. Nothing is written until the user
+// presses Accept (or the batch Accept all) — Edit folds out an inline form to
+// tweak the metadata before it is written.
 function cuDiffRow(p){
   const song = allSongs.find(s=>s.id===p.song_id) || {};
-  const cur = {
+  const editing = cleanupEditingId === p.song_id;
+  // What will be written on Accept: the user's edits on top of the proposal.
+  const eff = Object.assign({}, p, cleanupEdits.get(p.song_id) || {});
+  // Genre fill touches one field only, so its review row shows (and writes)
+  // just the genre — no misleading title/artist diff it would not apply.
+  const cur = cleanupGenreOnly ? {
+    Genre:  song.genre  || '—'
+  } : {
+    // Current tags as they sit in the file right now.
     Title:  song.title  || song.filename || '—',
     Artist: song.artist || '—',
     Album:  song.album  || '—',
     Year:   song.year   || '—',
     Genre:  song.genre  || '—'
   };
-  const prop = {
-    Title:  p.title,  Artist: p.artist, Album: p.album,
-    Year:   p.year,   Genre:  p.genre || '—'
+  const prop = cleanupGenreOnly ? {
+    Genre:  eff.genre || '—'
+  } : {
+    Title:  eff.title,  Artist: eff.artist, Album: eff.album,
+    Year:   eff.year,   Genre:  eff.genre || '—'
   };
   const changed = k => String(cur[k]).trim().toLowerCase() !== String(prop[k]||'—').trim().toLowerCase();
   const fields = Object.keys(cur).map(k => `
     <div class="cu-k">${k}</div>
     <div class="cu-old${changed(k)?' changed':''}">${esc(cur[k])}</div>
     <div class="cu-new${changed(k)?' changed':''}">${esc(prop[k]||'—')}</div>`).join('');
-  return `<div class="cu-row">
+  const edited = cleanupEdits.has(p.song_id);
+  return `<div class="cu-row" id="cu-row-${p.song_id}" style="${editing?'border-color:var(--cyan);box-shadow:0 0 0 2px var(--cyan-dim)':''}">
     <div class="cu-head">
-      <input type="checkbox" id="cu-chk-${p.song_id}" ${p.confidence==='low'?'':'checked'}
-        style="accent-color:var(--cyan);flex-shrink:0" title="Apply this fix">
       <div class="cu-name" title="${esc(song.title || '')}">${esc(song.title || song.filename || '')}</div>
       <span class="cu-conf ${p.confidence}">${p.confidence}${p.duration_delta!=null?` · ±${p.duration_delta}s`:''}</span>
+      ${p.genre_source ? `<span class="cu-src" title="Genre proposed by ${esc(p.genre_source)}">${esc(p.genre_source)}</span>` : ''}
+      <div class="cu-actions">
+        <button class="cu-ok" title="${cleanupGenreOnly ? 'Write this genre to the track' : 'Write the proposed tags to this track'}"
+          onclick="acceptCleanupRow(${p.song_id})">✓ Accept</button>
+        <button class="cu-no" title="${cleanupGenreOnly ? 'Skip this track — nothing is written' : "Keep this track's current tags — it won't be proposed again"}"
+          onclick="rejectCleanupRow(${p.song_id})">✕ ${cleanupGenreOnly ? 'Skip' : 'Reject'}</button>
+        <button class="br" title="Tweak the metadata before writing it"
+          onclick="toggleCleanupEdit(${p.song_id})">✎ Edit</button>
+      </div>
     </div>
     <div class="cu-diff">
-      <div class="cu-k"></div><div class="cu-k">current</div><div class="cu-k">spotify</div>
+      <div class="cu-k"></div><div class="cu-k">current</div><div class="cu-k">will become${edited?' (edited)':''}</div>
       ${fields}
     </div>
+    ${editing ? `
+    <div class="cu-edit">
+      <div class="cu-k">Edit</div>
+      <div style="display:flex;gap:6px;justify-content:flex-end">
+        <button class="cu-ok" onclick="saveCleanupEdit(${p.song_id})">Save</button>
+        <button class="cu-no" onclick="toggleCleanupEdit(null)">Cancel</button>
+      </div>
+      ${cleanupGenreOnly ? cuEditRow('genre', eff)
+        : cuEditRow('title', eff)+cuEditRow('artist', eff)+cuEditRow('album', eff)
+          +cuEditRow('year', eff)+cuEditRow('genre', eff)}
+    </div>` : ''}
   </div>`;
+}
+
+// Re-renders the review list AND, when the song info panel has an inline
+// cleanup row open, that row too — the Edit form lives in whichever is open.
+function refreshCleanupRowContainers(){
+  renderCleanupReview();
+  const body = document.getElementById('cleanupSectionBody');
+  if(body && document.getElementById('infoModal').classList.contains('open')
+     && cleanupProposals.length === 1){
+    body.innerHTML = cuDiffRow(cleanupProposals[0]);
+  }
+}
+
+// After a decision, if the info panel is open on that song, swap its inline
+// cleanup row for the decided-state header (badge).
+function refreshInfoCleanupAfterDecision(){
+  if(!document.getElementById('infoModal').classList.contains('open')) return;
+  const ids = JSON.parse(document.getElementById('infoModal').dataset.ids||'[]');
+  if(ids.length !== 1) return;
+  renderCleanupSection(allSongs.find(s=>s.id===ids[0]));
+}
+
+// Keeps the info panel's Title/Artist/… inputs showing the freshly written
+// tags (they'd otherwise still display the pre-cleanup values).
+function syncInfoInputs(songId){
+  const song = allSongs.find(s=>s.id===songId);
+  if(!song || !document.getElementById('info-title')) return;
+  ['title','artist','album','year','genre'].forEach(k => {
+    const el = document.getElementById(`info-${k}`);
+    if(el && el.value !== (song[k]||'')) el.value = song[k]||'';
+  });
 }
 
 function renderCleanupReview(){
   const body = document.getElementById('cleanupModalBody');
+  // Batch buttons only make sense over a list of undecided proposals.
+  const showBatch = !cleanupScanError && cleanupProposals.length > 0;
+  document.getElementById('cleanupApplyBtn').style.display = showBatch ? '' : 'none';
+  document.getElementById('cleanupRejectBtn').style.display = showBatch ? '' : 'none';
   if(cleanupScanError){
     body.innerHTML = `<div class="empty" style="padding:30px 0"><div class="empty-icon">🔌</div>
       <div style="font-weight:600;color:var(--text)">Spotify isn't available</div>
@@ -4701,60 +6111,195 @@ function renderCleanupReview(){
   }
   if(!cleanupProposals.length){
     body.innerHTML = `<div class="empty" style="padding:40px 0"><div class="empty-icon">🎧</div>
-      <div>${cleanupScanAbort ? 'Scan cancelled' : 'No Spotify matches found'}.</div></div>`;
+      <div>${cleanupScanAbort ? 'Scan cancelled'
+        : cleanupGenreOnly ? 'No Spotify matches with a genre found' : 'No Spotify matches found'}.</div></div>`;
     return;
   }
   // Threshold: only show matches at or above the chosen confidence. Hidden
   // rows are NOT decided — they come back unless the user lowers the threshold.
-  const shown = cleanupProposals.filter(p =>
-    CLEANUP_CONF_RANK[p.confidence] >= CLEANUP_CONF_RANK[cleanupMinConfidence]);
+  // Genre fill uses the very same Low/Med/High choice as the metadata cleanup.
+  const shown = shownCleanupProposals();
   const hidden = cleanupProposals.length - shown.length;
   body.innerHTML = `
     <div style="font-size:11px;color:var(--muted);margin-bottom:10px">
-      ${shown.length} of ${cleanupProposals.length} match${cleanupProposals.length===1?'':'es'} shown${hidden ? ` · ${hidden} below threshold (undecided)` : ''}.
-      Uncheck anything you don't want changed —
-      <b style="color:var(--text2)">nothing is written until you hit Apply</b>.</div>
+      ${cleanupGenreOnly
+        ? `${shown.length} of ${cleanupProposals.length} genre match${cleanupProposals.length===1?'':'es'} shown${hidden ? ` · ${hidden} below threshold (undecided)` : ''}.
+           Decide each one with its buttons —
+           <b style="color:var(--text2)">only the genre is written, and only where the track has none</b>.`
+        : `${shown.length} of ${cleanupProposals.length} match${cleanupProposals.length===1?'':'es'} shown${hidden ? ` · ${hidden} below threshold (undecided)` : ''}.
+           Decide each one with its buttons —
+           <b style="color:var(--text2)">nothing is written until you Accept</b>.`}</div>
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
       <span style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--muted);text-transform:uppercase">Min confidence</span>
-      <div class="sw-pills" style="margin:0">${cleanupConfPill('low')}${cleanupConfPill('medium')}${cleanupConfPill('high')}</div>
+      <div class="sw-pills" style="margin:0">${cleanupConfPill('low',activeCleanupConfidence())}${cleanupConfPill('medium',activeCleanupConfidence())}${cleanupConfPill('high',activeCleanupConfidence())}</div>
     </div>
     ${shown.length
       ? shown.map(cuDiffRow).join('')
       : `<div class="empty" style="padding:26px 0"><div class="empty-icon">🎯</div>
-         <div>No matches at ${cleanupMinConfidence} confidence or above</div>
+         <div>No matches at ${activeCleanupConfidence()} confidence or above</div>
          <div style="font-size:11px;color:var(--muted)">Lower the threshold to see the rest.</div></div>`}`;
-  document.getElementById('cleanupApplyBtn').style.display = '';
-  cleanupReviewShown = true;
 }
 
-async function applyMetadataCleanup(){
-  const rows = cuVisibleRows();
-  const chosen = cleanupProposals.filter(p => rows.some(r => r.id === p.song_id && r.checked));
-  const uncheckedSeen = rows.filter(r => !r.checked).map(r => r.id);
-  if(!chosen.length){ alert('Nothing selected.'); return; }
+// One Accept press: writes the proposal (with any inline edits) to the file,
+// marks the song 'applied' and drops the row from the panel.
+function acceptCleanupRow(songId){
+  if(cleanupScanning || cleanupBusy) return Promise.resolve();
+  return _acceptCleanupRow(songId);
+}
+function rejectCleanupRow(songId){
+  if(cleanupScanning || cleanupBusy) return Promise.resolve();
+  return _rejectCleanupRow(songId);
+}
+// Pulls the server's error message out of a failed cleanup response so the
+// toast can say WHY a decision failed (e.g. old server without the endpoint).
+async function _cleanupSrvError(r){
+  let msg = '';
+  try{ msg = (await r.json()).error || ''; }catch(e){}
+  return msg || `Server error ${r.status}`;
+}
+
+async function _acceptCleanupRow(songId){
+  if(cleanupBusy) return;
+  const p = cleanupProposals.find(x => x.song_id === songId);
+  if(!p) return;
+  const edits = cleanupEdits.get(songId) || {};
+  cleanupBusy = true;
+  try{
+    // Genre fill writes one field through a narrower endpoint that records no
+    // cleanup decision, so the track is still visible to a later full cleanup.
+    const r = await fetch(cleanupGenreOnly ? `/api/cleanup/apply-genre/${songId}`
+                                          : `/api/cleanup/apply/${songId}`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(cleanupGenreOnly
+        ? { genre: effGenre(edits, p) }
+        : { title:effTitle(edits,p), artist:effArtist(edits,p), album:effAlbum(edits,p),
+            year:effYear(edits,p), genre:effGenre(edits,p), spotify_id:p.spotify_id })
+    });
+    if(!r.ok) throw new Error(await _cleanupSrvError(r));
+    if(cleanupGenreOnly){
+      const s = allSongs.find(x => x.id === songId);
+      if(s) s.genre = effGenre(edits, p) || s.genre;   // mirror the written genre
+      updateCleanupHint();
+    } else {
+      syncCleanupSong(songId, 'applied');
+    }
+    cleanupProposals = cleanupProposals.filter(x => x.song_id !== songId);
+    cleanupEdits.delete(songId);
+    if(cleanupEditingId === songId) cleanupEditingId = null;
+    renderCleanupReview();
+    refreshInfoCleanupAfterDecision();
+    updateCleanupHint();
+    await loadSongs();
+    syncInfoInputs(songId);   // keep the editable fields in step with the file
+    toast(cleanupGenreOnly ? '♪ Genre added' : '✓ Tags updated');
+  }catch(e){ toast(e && e.message ? e.message : 'Accept failed'); }
+  cleanupBusy = false;
+}
+
+// One Reject press: the song is marked 'rejected' (keep my tags) and never
+// re-proposed.
+async function _rejectCleanupRow(songId){
+  cleanupBusy = true;
+  try{
+    if(cleanupGenreOnly){
+      // Skipping a genre is local to this review: nothing was written and no
+      // decision is recorded, so the track keeps its never-scanned status.
+      cleanupProposals = cleanupProposals.filter(x => x.song_id !== songId);
+      cleanupEdits.delete(songId);
+      if(cleanupEditingId === songId) cleanupEditingId = null;
+      renderCleanupReview();
+      toast('Skipped — no genre written');
+      cleanupBusy = false;
+      return;
+    }
+    const r = await fetch(`/api/cleanup/decide/${songId}`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ decision:'rejected' })
+    });
+    if(!r.ok) throw new Error(await _cleanupSrvError(r));
+    syncCleanupSong(songId, 'rejected');
+    cleanupProposals = cleanupProposals.filter(x => x.song_id !== songId);
+    cleanupEdits.delete(songId);
+    if(cleanupEditingId === songId) cleanupEditingId = null;
+    renderCleanupReview();
+    refreshInfoCleanupAfterDecision();
+    updateCleanupHint();
+    toast('✕ Kept as-is — marked as rejected');
+  }catch(e){ toast(e && e.message ? e.message : 'Reject failed'); }
+  cleanupBusy = false;
+}
+
+// Batch mode: Accept all / Reject all, applied row by row with live progress
+// in the footer. Individual rows can still be decided first; the batch only
+// covers what is left.
+function shownCleanupProposals(){
+  return cleanupProposals.filter(p =>
+    CLEANUP_CONF_RANK[p.confidence] >= CLEANUP_CONF_RANK[activeCleanupConfidence()]);
+}
+async function acceptAllCleanup(){
+  if(cleanupScanning) return;
+  const rows = shownCleanupProposals();
+  if(!rows.length){ return; }
+  if(rows.length > 1 && !confirm(`Accept the proposed ${cleanupGenreOnly?'genre':'Spotify tags'} for all ${rows.length} shown track(s)?\nEdits you made are kept.`)) return;
   const btn = document.getElementById('cleanupApplyBtn');
   const status = document.getElementById('cleanupApplyStatus');
   btn.disabled = true;
   let done = 0, failed = 0;
-  for(const p of chosen){
-    status.textContent = `Writing ${done + failed + 1} / ${chosen.length}…`;
-    try{
-      const r = await fetch(`/api/cleanup/apply/${p.song_id}`, {
-        method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ title:p.title, artist:p.artist, album:p.album,
-                               year:p.year, genre:p.genre, spotify_id:p.spotify_id })
-      });
-      if(r.ok) done++; else failed++;
-    }catch(e){ failed++; }
+  for(const p of rows){
+    status.textContent = `Writing ${done + failed + 1} / ${rows.length}…`;
+    await acceptCleanupRow(p.song_id);
+    if(!cleanupProposals.some(x => x.song_id === p.song_id)) done++; else failed++;
   }
   btn.disabled = false;
   status.textContent = `✓ Updated ${done} track${done===1?'':'s'}${failed ? ` · ${failed} failed` : ''}`;
-  // Applied rows were marked 'applied' by the server; the ones the user saw
-  // and left unchecked are recorded as "keep my tags".
-  markCleanupDecision(uncheckedSeen, 'skipped');
-  cleanupReviewShown = false;
   await loadSongs();
 }
+async function rejectAllCleanup(){
+  if(cleanupScanning) return;
+  const rows = shownCleanupProposals();
+  if(!rows.length){ return; }
+  if(rows.length > 1 && !confirm(`Reject the proposal for all ${rows.length} shown track(s)?\nThey keep their current tags and won't be proposed again.`)) return;
+  const btn = document.getElementById('cleanupRejectBtn');
+  const status = document.getElementById('cleanupApplyStatus');
+  btn.disabled = true;
+  let done = 0;
+  for(const p of rows){
+    status.textContent = `Rejecting ${done + 1} / ${rows.length}…`;
+    await rejectCleanupRow(p.song_id);
+    done++;
+  }
+  btn.disabled = false;
+  status.textContent = `✕ Rejected ${done} track${done===1?'':'s'}`;
+}
+
+// Inline Edit form on a proposal row: tweak the metadata before it is written.
+function toggleCleanupEdit(songId){
+  cleanupEditingId = (cleanupEditingId === songId) ? null : songId;
+  refreshCleanupRowContainers();
+}
+
+// Reads the open edit form (or falls back to the proposal itself) and merges
+// it into cleanupEdits; blank fields stay as the proposal's value.
+function saveCleanupEdit(songId){
+  const p = cleanupProposals.find(x => x.song_id === songId);
+  if(!p) return;
+  const edits = {};
+  ['title','artist','album','year','genre'].forEach(k => {
+    const el = document.getElementById(`cu-ed-${k}`);
+    if(el && el.value.trim() !== '') edits[k] = el.value.trim();
+  });
+  if(Object.keys(edits).length) cleanupEdits.set(songId, edits);
+  else cleanupEdits.delete(songId);
+  cleanupEditingId = null;
+  refreshCleanupRowContainers();
+}
+
+// Effective field for writing: the user's edit when present, else the proposal.
+function effTitle(edits, p){  return edits.title  ?? p.title;  }
+function effArtist(edits, p){ return edits.artist ?? p.artist; }
+function effAlbum(edits, p){  return edits.album  ?? p.album;  }
+function effYear(edits, p){   return edits.year   ?? p.year;   }
+function effGenre(edits, p){  return edits.genre  ?? p.genre;  }
 
 // ── PREVIEW PLAYER ────────────────────────────────────────────────────────
 // Streams the audio file for a track from the backend into one shared
