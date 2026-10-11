@@ -174,20 +174,26 @@ function relationshipPayload() {
     ],
     hubs: [{ id: 'genre:progressive-house', type: 'genre', label: 'Progressive House', weight: 83,
       degree: 2, songs: 83, detail: {} }],
+    // Every finding carries `actions` (its buttons) and `action`, the first of
+    // them, so a panel that renders a single button keeps working.
     findings: [
       { id: 'single-track-genres', severity: 'warn', title: '31 genres carry a single track',
         detail: 'A genre used once is usually a flavour.', metric: 31, song_ids: [1, 2],
         node_ids: ['genre:house'],
-        action: { kind: 'open', label: 'Review tags vs genres', target: 'tag-review' } },
+        action: { kind: 'open', label: 'Review tags vs genres', target: 'tag-review' },
+        actions: [{ kind: 'open', label: 'Review tags vs genres', target: 'tag-review' }] },
       { id: 'genreless', severity: 'warn', title: '154 tracks have no genre',
         detail: 'They show as blank in Mixxx.', metric: 154, song_ids: [7, 8, 9], node_ids: [],
-        action: { kind: 'select-songs', label: 'Select those tracks', target: 'genreless' } },
+        action: { kind: 'select-songs', label: 'Select those tracks', target: 'genreless' },
+        actions: [{ kind: 'select-songs', label: 'Select those tracks', target: 'genreless' }] },
       { id: 'no-key', severity: 'warn', title: '40 tracks have no key', detail: 'No key, no wheel.',
         metric: 40, song_ids: [11], node_ids: [],
-        action: { kind: 'run-analysis', label: 'Analyse BPM & key', target: 'analyze-bpm' } },
+        action: { kind: 'run-analysis', label: 'Analyse BPM & key', target: 'analyze-bpm' },
+        actions: [{ kind: 'run-analysis', label: 'Analyse BPM & key', target: 'analyze-bpm' }] },
       { id: 'no-crates', severity: 'info', title: 'No crates yet', detail: 'Crates group a set.',
         metric: 0, song_ids: [], node_ids: [],
-        action: { kind: 'open', label: 'Go to crates', target: 'crates' } },
+        action: { kind: 'open', label: 'Go to crates', target: 'crates' },
+        actions: [{ kind: 'open', label: 'Go to crates', target: 'crates' }] },
     ],
     stats: { songs: 605, nodes: 184, edges: 420, isolated: 55, transition_links: 1,
       text_only_transitions: 0, omitted_nodes: 0, omitted_edges: 179, node_limit: 120,
@@ -543,6 +549,46 @@ test('findings are listed with their action, and the cap is admitted', async () 
   }
   const footer = textOf(rail, 'relFooter') + textOf(rail, 'relSummary') + textOf(rail, 'relStatus');
   assert.match(footer, /179|599/, 'the links left out by the edge cap are admitted, not hidden');
+});
+
+test('a finding can offer more than one button, and older payloads still work', async () => {
+  // A crate finding both selects the tracks in its crates and takes you to the
+  // crates; `action` alone is still honoured for a payload that predates it.
+  const payload = relationshipPayload();
+  const thin = payload.findings.find((finding) => finding.id === 'no-crates');
+  thin.actions = [
+    { kind: 'select-songs', label: 'Select those tracks', target: 'thin-crates', song_ids: [1, 2] },
+    { kind: 'open', label: 'Go to crates', target: 'crates' },
+  ];
+  thin.action = thin.actions[0];
+  const rail = loadRail({ fetch: layeredFetch(payload) });
+  await openRail(rail);
+
+  const card = rail.document.getElementById('relFindings').innerHTML;
+  const finding = card.slice(card.indexOf('No crates yet'));
+  assert.match(finding.slice(0, 900), /Select those tracks/);
+  assert.match(finding.slice(0, 900), /Go to crates/,
+    'both of the finding\'s buttons are rendered');
+  assert.ok(finding.indexOf('Select those tracks') < finding.indexOf('Go to crates'),
+    'and in the order the payload gave them');
+
+  rail.runRelationshipAction(thin.actions[0]);
+  assert.ok(rail.selectedIds.has(1) && rail.selectedIds.has(2),
+    'the first button selects what it named');
+  rail.runRelationshipAction(thin.actions[1]);
+  assert.equal(rail.__log.tabs[rail.__log.tabs.length - 1], 'crates',
+    'the second opens the crate view');
+
+  // `action` with no `actions`: what a panel served by an older payload sees.
+  const legacy = relationshipPayload();
+  for (const finding of legacy.findings) delete finding.actions;
+  const old = loadRail({ fetch: layeredFetch(legacy) });
+  await openRail(old);
+  const legacyCard = textOf(old, 'relFindings');
+  for (const finding of legacy.findings) {
+    assert.ok(legacyCard.includes(finding.action.label),
+      `"${finding.action.label}" still renders from action alone`);
+  }
 });
 
 test('hiding, showing and maximising are the three rail states', async () => {

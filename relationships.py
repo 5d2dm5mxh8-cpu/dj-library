@@ -472,13 +472,18 @@ class Relationships:
         total = len(songs)
 
         def add(identifier, severity, title, detail, metric,
-                song_ids=None, node_ids=None, action=None):
+                song_ids=None, node_ids=None, action=None, actions=None):
+            # A finding may need two buttons (a crate finding both selects its
+            # tracks and takes you to the crates); `action` stays the primary
+            # one so a panel that renders a single button keeps working.
+            buttons = list(actions) if actions else ([action] if action else [])
             findings.append({
                 'id': identifier, 'severity': severity, 'title': title,
                 'detail': detail, 'metric': metric,
                 'song_ids': sorted(set(song_ids or []))[:SONG_ID_LIMIT],
                 'node_ids': list(node_ids or [])[:SONG_ID_LIMIT],
-                'action': action,
+                'action': buttons[0] if buttons else None,
+                'actions': buttons,
             })
 
         # Genres: the shape of the collection.
@@ -553,8 +558,15 @@ class Relationships:
                     ', '.join(f'{name} ({count})' for name, count, _ in thin[:6])
                     + ' — worth filling or folding together.',
                     len(thin), song_ids=[s for _, _, ids in thin for s in ids],
+                    # The crates themselves, so a busy rail can point at them.
+                    node_ids=[f'crate:{slug(name)}' for name, _, _ in thin],
                     action={'kind': 'select-songs', 'label': 'Select those tracks',
-                            'target': 'thin-crates'})
+                            'target': 'thin-crates'},
+                    actions=[
+                        {'kind': 'select-songs', 'label': 'Select those tracks',
+                         'target': 'thin-crates'},
+                        {'kind': 'open', 'label': 'Go to crates', 'target': 'crates'},
+                    ])
 
         # Transitions.
         if not transitions:
@@ -563,12 +575,27 @@ class Relationships:
                 'tracks here, and rides along in the file comment and the XML export.',
                 0, action={'kind': 'open', 'label': 'Go to transitions', 'target': 'transitions'})
         elif text_only:
+            # The tracks whose mix leaves the library: they have a transition
+            # node even though the target has none, so the finding can name
+            # them and the panel can select them.
+            outside = [row.get('from_song_id') for row in transitions
+                       if not row.get('to_song_id')]
+            songs_by_id = {s['id']: s for s in songs}
+            out_nodes = [f'transition:{slug(self._song_label(songs_by_id[song_id]))}'
+                         for song_id in outside if song_id in songs_by_id]
             add('text-only-transitions', 'info',
                 f'{text_only} transitions point outside the library',
                 'They record a mix into a track you do not own, so there is no second '
                 'node to draw — the note still exports.',
-                text_only, action={'kind': 'open', 'label': 'Go to transitions',
-                                  'target': 'transitions'})
+                text_only, song_ids=outside, node_ids=out_nodes,
+                action={'kind': 'open', 'label': 'Go to transitions',
+                        'target': 'transitions'},
+                actions=[
+                    {'kind': 'open', 'label': 'Go to transitions',
+                     'target': 'transitions'},
+                    {'kind': 'select-songs', 'label': 'Select those tracks',
+                     'target': 'text-only-transitions'},
+                ])
 
         # Keys: coverage and the shelves that mix nowhere.
         keyed = buckets['key']
