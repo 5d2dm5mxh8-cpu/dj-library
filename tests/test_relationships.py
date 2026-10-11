@@ -270,6 +270,49 @@ class GraphLayerContracts(RelationshipTestBase):
         self.assertEqual(payload['edges'], [])
         self.assertEqual(payload['stats']['nodes'], 0)
 
+    def test_one_layer_comes_back_alone_with_its_own_honest_counts(self):
+        """What the rail's "show only this layer" asks for: that layer's nodes,
+        whatever edges survive between them, and stats about what it got."""
+        self.add_crate(1, 'Warm-up', song_ids=(1, 2))
+        self.add_crate(2, 'Peak', song_ids=(1,))
+        payload = self.graph(layers='crate')
+        self.assertEqual(payload['layers'], ['crate'])
+        self.assertEqual({node['type'] for node in payload['nodes']}, {'crate'})
+        self.assertEqual(len(payload['nodes']), self.layer_option(payload, 'crate')['nodes'])
+        self.assertEqual(payload['stats']['nodes'], len(payload['nodes']))
+        # Two crates share a track, but one layer never joins to itself, so an
+        # isolated crate graph is dots with no lines -- not a broken payload.
+        self.assertEqual(payload['edges'], [])
+        self.assertEqual(payload['stats']['edges'], 0)
+
+    def test_asking_layer_by_layer_adds_up_to_the_whole_graph(self):
+        """Isolation filters the graph; it must never build a different one."""
+        self.add_crate(1, 'Warm-up', song_ids=(1, 2))
+        self.add_transition(1, target=2, notes='works')
+        whole = self.graph()
+        by_layer = {layer: self.graph(layers=layer) for layer in relationships.LAYERS}
+        for layer, payload in by_layer.items():
+            self.assertEqual({node['id'] for node in payload['nodes']},
+                             {node['id'] for node in self.nodes_of(whole, layer)}, layer)
+            self.assertEqual(payload['layers'], [layer])
+            self.assertEqual(payload['stats']['nodes'], len(payload['nodes']))
+            for edge in payload['edges']:
+                self.assertEqual(self.node(payload, edge['source'])['type'], layer)
+                self.assertEqual(self.node(payload, edge['target'])['type'], layer)
+        self.assertEqual(sorted(node['id'] for node in whole['nodes']),
+                         sorted(node['id'] for payload in by_layer.values()
+                                for node in payload['nodes']),
+                         'every node is in exactly one layer')
+
+    def test_repeated_names_collapse_and_an_empty_selection_means_all_of_them(self):
+        self.add_crate(1, 'Warm-up', song_ids=(1,))
+        self.assertEqual(self.graph(layers=' CRATE , crate ,, ')['layers'], ['crate'])
+        self.assertEqual(self.graph(layers='crate,key')['layers'], ['crate', 'key'])
+        # `?layers=` with an empty value is still "no filter"; the panel only
+        # sends a real selection when the user makes one.
+        self.assertEqual(self.graph(layers='')['layers'], list(relationships.LAYERS))
+        self.assertEqual(self.graph()['layers'], list(relationships.LAYERS))
+
     def test_the_arrangement_is_echoed_and_falls_back_to_clusters(self):
         self.assertEqual(self.graph(arrangement='wheel')['arrangement'], 'wheel')
         self.assertEqual(self.graph(arrangement='nonsense')['arrangement'], 'clusters')
@@ -431,6 +474,13 @@ class GraphFindingContracts(RelationshipTestBase):
         self.assertEqual(finding['metric'], 1)
         self.assertEqual(finding['song_ids'], [1])
         self.assertIn('Tiny (1)', finding['detail'])
+        # It names the crate itself, so a busy rail can point at it, and it
+        # offers both things a DJ would do next: take the tracks, or go and fix
+        # the crate. `action` stays the primary button for older panels.
+        self.assertEqual(finding['node_ids'], ['crate:tiny'])
+        self.assertEqual([button['target'] for button in finding['actions']],
+                         ['thin-crates', 'crates'])
+        self.assertEqual(finding['action'], finding['actions'][0])
 
     def test_text_only_transitions_are_counted_as_leaving_the_library(self):
         self.add_song(1, artist='Same', genre='House', key='G min')
@@ -442,6 +492,12 @@ class GraphFindingContracts(RelationshipTestBase):
         self.assertEqual(finding['metric'], 1)
         self.assertEqual(finding['action']['target'], 'transitions')
         self.assertIsNone(self.finding(payload, 'no-transitions'))
+        # The track whose mix leaves the library has a transition node even
+        # though its target has none, so the finding can name and select it.
+        self.assertEqual(finding['song_ids'], [1])
+        self.assertEqual(finding['node_ids'], ['transition:song-1-same'])
+        self.assertEqual([button['kind'] for button in finding['actions']],
+                         ['open', 'select-songs'])
 
     def test_one_hit_artists_explain_why_the_artist_layer_is_thin(self):
         self.add_song(1, artist='Repeated', genre='House', key='G min')
@@ -478,11 +534,19 @@ class GraphFindingContracts(RelationshipTestBase):
             self.assertTrue(finding['detail'].strip(), finding)
             self.assertIsInstance(finding['song_ids'], list)
             self.assertIsInstance(finding['node_ids'], list)
-            if finding['action'] is not None:
-                self.assertIn(finding['action']['kind'],
+            # `actions` is the full list of buttons and `action` its first, so a
+            # finding with no way to act reports neither rather than one of
+            # them being a half-built button.
+            self.assertIsInstance(finding['actions'], list)
+            if finding['action'] is None:
+                self.assertEqual(finding['actions'], [], finding['id'])
+            else:
+                self.assertEqual(finding['action'], finding['actions'][0], finding['id'])
+            for button in finding['actions']:
+                self.assertIn(button['kind'],
                               ('select-songs', 'open', 'focus', 'run-analysis'))
-                self.assertTrue(finding['action']['label'].strip())
-                self.assertTrue(finding['action']['target'])
+                self.assertTrue(button['label'].strip())
+                self.assertTrue(button['target'])
         # Warnings come first: the panel reads top-down.
         severities = [f['severity'] for f in payload['findings']]
         self.assertEqual(severities, sorted(severities, key=lambda s: s != 'warn'))

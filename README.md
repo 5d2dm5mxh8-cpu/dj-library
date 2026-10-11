@@ -434,15 +434,18 @@ shares tracks with — plus **Select these N tracks**, which selects them in the
 table so the selection toolbar can edit, crate or delete them. Clicking empty
 space clears the focus; hovering names the node under the pointer.
 
-**Findings** are read off the same counts, never hard-coded, and each one acts:
+**Findings** are read off the same counts, never hard-coded, and each one acts — a
+finding may carry more than one button when there is more than one useful next
+step:
 
-| Finding | It says | Its button does |
+| Finding | It says | Its buttons do |
 | --- | --- | --- |
 | Genres carrying one track | a genre used once is usually a flavour, not a genre | opens Tools → Genres & tags |
 | Filing accidents | a genre value that is a number or punctuation (`70`) | selects those tracks |
 | Tracks with no genre | they show blank in Mixxx and match no genre rule | selects those tracks |
 | No tags / no crates / no transitions | that layer is empty yet, and what it is for | opens that tab |
-| Transitions pointing outside the library | a mix into a track you do not own | opens the Transitions tab |
+| Crates holding fewer than 3 tracks | a one-track crate is usually a slip, not a set | selects those tracks, or goes to the crates |
+| Transitions pointing outside the library | a mix into a track you do not own | opens the Transitions tab, or selects the tracks whose mix leaves |
 | Tracks with no key | the Camelot wheel and harmonic findings stay half-blind | starts BPM & key analysis |
 | Keys that mix nowhere | 8+ tracks in a key whose neighbouring Camelot keys are empty | selects those tracks |
 | Two genres holding N% of the library | where the collection actually sits | focuses both in the rail |

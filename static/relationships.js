@@ -667,10 +667,14 @@ function relRenderFindings() {
     return true;
   }
   el.innerHTML = findings.map(finding => {
-    const action = finding.action
-      ? '<button type="button" class="rel-act" onclick="runRelationshipAction('
-        + relEsc(JSON.stringify(finding.action)) + ')">' + relEsc(finding.action.label || 'Open') + '</button>'
-      : '';
+    // A finding can offer more than one button (a thin crate both selects its
+    // tracks and goes to the crates); `action` is the primary one, so a payload
+    // from an older panel still renders a single button.
+    const buttons = (Array.isArray(finding.actions) && finding.actions.length)
+      ? finding.actions : (finding.action ? [finding.action] : []);
+    const action = buttons.map(button =>
+      '<button type="button" class="rel-act" onclick="runRelationshipAction('
+      + relEsc(JSON.stringify(button)) + ')">' + relEsc(button.label || 'Open') + '</button>').join('');
     return '<div class="rel-finding ' + relEsc(finding.severity || 'info') + '">'
       + '<div class="rel-finding-top"><span class="rel-dot ' + relEsc(finding.severity || 'info') + '"></span>'
       + '<span class="rel-finding-title">' + relEsc(finding.title) + '</span></div>'

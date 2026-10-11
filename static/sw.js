@@ -13,7 +13,7 @@ const SHELL = [
 ];
 // Bump the version whenever the shell changes so the old cached HTML is
 // purged on activate — a stale frontend keeps serving old bugs forever.
-const CACHE = 'djlib-v18';
+const CACHE = 'djlib-v19';
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)));
