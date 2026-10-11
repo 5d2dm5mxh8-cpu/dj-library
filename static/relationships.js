@@ -310,9 +310,15 @@ async function loadRelationships(force) {
   }
   try {
     const response = await fetch(url);
-    const data = await response.json();
+    // Read the body before parsing it. An error page is HTML, and parsing that
+    // as JSON throws a browser-specific message -- "The string did not match
+    // the expected pattern." in Safari -- which hides the status that actually
+    // explains it.
+    const body = await response.text();
+    let data = null;
+    try { data = body ? JSON.parse(body) : null; } catch (parseError) { data = null; }
     if (requestId !== relState.requestId) return relState.data;
-    if (!response.ok) throw new Error((data && data.error) || ('HTTP ' + response.status));
+    if (!response.ok || !data) throw new Error(relGraphError(response, data));
     relState.data = data;
     relState.error = '';
     // The load is done: drop the 'Counting…' line rather than leaving it up as
@@ -329,6 +335,19 @@ async function loadRelationships(force) {
   }
   renderRelationships();
   return relState.data;
+}
+
+// Why the graph did not arrive, in words that point at the thing to do about
+// it. A 404 here means the server process is older than the page it is serving:
+// the endpoint landed after it started, so it has to be restarted.
+function relGraphError(response, data) {
+  if (data && data.error) return String(data.error);
+  if (response.status === 404) {
+    return 'HTTP 404 \u2014 the running app is older than this page, so it does '
+      + 'not know this endpoint yet. Restart DJ Library to load the current code.';
+  }
+  if (!response.ok) return 'HTTP ' + response.status;
+  return 'the server sent something that is not the graph.';
 }
 
 async function refreshRelationships() {

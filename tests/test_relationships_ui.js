@@ -251,9 +251,12 @@ function makeSandbox(options) {
     __log: log, __writes: writes,
   };
   sandbox.window = sandbox;
+  // A real Response answers text() as well as json(); the panel reads the body
+  // as text so an error page reports its status instead of a parse failure.
   sandbox.fetch = async (url, init) => {
     log.fetch.push({ url: String(url), init });
-    return { ok: true, status: 200, json: async () => relationshipPayload() };
+    const body = JSON.stringify(relationshipPayload());
+    return { ok: true, status: 200, text: async () => body, json: async () => relationshipPayload() };
   };
   if (settings.fetch) sandbox.fetch = settings.fetch;
   if (settings.localStorage) sandbox.localStorage = settings.localStorage;
@@ -292,7 +295,8 @@ function layeredFetch(payload, asked) {
     const ids = new Set(nodes.map((node) => node.id));
     const edges = (layers ? payload.edges.filter((edge) => ids.has(edge.source) && ids.has(edge.target))
       : payload.edges);
-    return { ok: true, status: 200, json: async () => ({ ...payload, nodes, edges, layers: layers || payload.layers }) };
+    const body = JSON.stringify({ ...payload, nodes, edges, layers: layers || payload.layers });
+    return { ok: true, status: 200, text: async () => body, json: async () => JSON.parse(body) };
   };
 }
 
@@ -923,13 +927,45 @@ test('a failed load leaves the rail usable and says so', async () => {
     'the failure is reported in the rail instead of thrown at the page');
 });
 
+test('a server that does not know the endpoint says to restart it', async () => {
+  // The page ships with the repo but the Flask process may be older than it: a
+  // pulled update does not reach a running server, so /api/relationships answers
+  // 404 with an HTML error page. That has to read as "restart", not as a JSON
+  // parse failure in whatever words the browser happens to use.
+  const notFound = '<!doctype html><html><title>404 Not Found</title><h1>Not Found</h1></html>';
+  const rail = loadRail({
+    fetch: async () => ({ ok: false, status: 404, text: async () => notFound }),
+  });
+  await openRail(rail);
+  const said = textOf(rail, 'relStatus') + textOf(rail, 'relLegend');
+  assert.match(said, /404/, 'the status the server sent is reported');
+  assert.match(said, /restart/i, 'and so is the thing to do about it');
+  assert.doesNotMatch(said, /expected pattern|Unexpected token|JSON/i,
+    'no browser-specific parse error instead of the real reason');
+  assert.equal(rail.relState.data, null, 'no half-a-graph is invented');
+  assert.equal(railState(rail), 'open', 'the rail stays there to retry in');
+});
+
+test('an error page from the API reports its status, not a parse error', async () => {
+  const failure = '<!doctype html><title>500 Internal Server Error</title>';
+  const rail = loadRail({
+    fetch: async () => ({ ok: false, status: 500, text: async () => failure }),
+  });
+  await openRail(rail);
+  assert.match(textOf(rail, 'relStatus'), /500/, 'the real status is what is shown');
+  assert.equal(rail.relState.data, null);
+});
+
 test('an empty library says it is empty rather than pretending', async () => {
   const empty = { layers: LAYER_NAMES.slice(), arrangement: 'clusters', layer_options: [],
     nodes: [], edges: [], hubs: [], findings: [],
     stats: { songs: 0, nodes: 0, edges: 0, isolated: 0, transition_links: 0,
       text_only_transitions: 0, omitted_nodes: 0, omitted_edges: 0, node_limit: 120,
       edge_limit: 420 } };
-  const rail = loadRail({ fetch: async () => ({ ok: true, status: 200, json: async () => empty }) });
+  const rail = loadRail({
+    fetch: async () => ({ ok: true, status: 200, text: async () => JSON.stringify(empty),
+      json: async () => empty }),
+  });
   await openRail(rail);
   assert.match(textOf(rail, 'relFindings'), /nothing|no findings|empty|no tracks|import|scan/i,
     'an empty graph explains itself');
