@@ -17,6 +17,8 @@ import shutil
 from datetime import datetime
 import usb_export as usb_export_module
 import usb_export_routes
+import relationships as relationships_module
+import relationships_routes
 from pathlib import Path
 from flask import Flask, jsonify, request, send_from_directory, send_file, Response
 from watchdog.observers import Observer
@@ -4810,6 +4812,28 @@ def _usb_export_service():
 
 
 app.register_blueprint(usb_export_routes.create_usb_export_blueprint(_usb_export_service))
+
+
+# -- RELATIONSHIP GRAPH --------------------------------------------------------
+# The right-hand rail's data source: every layer of the library (genres, tags,
+# artists, albums, crates, keys, transitions) as nodes, weighted by how many
+# tracks carry them. Read-only -- it describes the library, never changes it.
+_relationships_lock = threading.Lock()
+
+
+def _relationships_service():
+    with _relationships_lock:
+        service = app.extensions.get('relationships')
+        if service is None:
+            service = relationships_module.Relationships(
+                get_db=get_db, to_camelot=to_camelot, crate_song_ids=crate_song_ids,
+                key_display=lambda: KEY_DISPLAY)
+            app.extensions['relationships'] = service
+        return service
+
+
+app.register_blueprint(
+    relationships_routes.create_relationships_blueprint(_relationships_service))
 
 
 # -- DJ SOFTWARE EXPORT (Rekordbox XML) ----------------------------------------

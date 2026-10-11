@@ -59,6 +59,13 @@ step, no database server (SQLite).
   to a writable mounted USB drive or SD card. Existing media is never erased.
 - **Auto-export** — a `rekordbox.xml` file is kept always-current on disk after
   every change, ready to import into Rekordbox, Serato, DJUCED or Engine DJ.
+- **Relationships rail** — **◇ Relationships** in the header opens a resizable
+  panel beside the table that draws your collection as one graph: genres, tags,
+  artists, albums, crates, keys and transitions as separate node types, sized by
+  how many tracks carry them and joined where two values share tracks. Two
+  arrangements (clusters or a Camelot wheel), per-layer on/off, and findings
+  computed from your own counts — each one a button, not a lecture. See
+  [Relationships rail](#relationships-rail).
 
 ## Choose your DJ software
 
@@ -395,6 +402,60 @@ is outstanding, and a sweep it starts can still be Canceled. Off by default:
 since each outstanding track costs a paced Discogs/MusicBrainz lookup, a large
 library takes a while to work through.
 
+## Relationships rail
+
+**◇ Relationships** in the header opens a panel on the right. It answers the
+question the table cannot: *how is this collection put together?* Every value in
+your library is a node, and two values are joined where they ride the same
+track.
+
+| Node type | One node per | Its weight |
+| --- | --- | --- |
+| Genres | genre value (a `House; Tech House` track makes two) | tracks carrying it |
+| Tags | tag in your tag tables | tracks carrying it |
+| Artists / Albums | artist / album name | tracks credited to it |
+| Crates | crate, smart crates evaluated through their rules | member tracks |
+| Keys | Camelot key (`6A`, `11B`) | tracks in that key |
+| Transitions | track taking part in a confirmed mix | always one track |
+
+The **Clusters** arrangement gives each layer its own region, heaviest values in
+the middle. The **Camelot wheel** puts the twelve keys and their two rings on the
+real wheel and orbits everything else around the key its tracks mostly sit in,
+so distance from the ring means something. The `+`, `−` and `…` buttons add a
+layer, remove one, or hold the arrangement switch, "show only this layer",
+"reset rail width", "count the library again" and "hide the rail". The strip on
+the rail's left edge resizes it (double-click resets); **⤢** lays it over the
+library instead of beside it, and **✕** hides it. The width, arrangement and
+layer set are remembered. On a window too narrow to hold both, the rail
+automatically uses the overlay and says so rather than squeezing the table.
+
+Click a node for what it is, how heavy it is, which key it sits in, and what it
+shares tracks with — plus **Select these N tracks**, which selects them in the
+table so the selection toolbar can edit, crate or delete them. Clicking empty
+space clears the focus; hovering names the node under the pointer.
+
+**Findings** are read off the same counts, never hard-coded, and each one acts:
+
+| Finding | It says | Its button does |
+| --- | --- | --- |
+| Genres carrying one track | a genre used once is usually a flavour, not a genre | opens Tools → Genres & tags |
+| Filing accidents | a genre value that is a number or punctuation (`70`) | selects those tracks |
+| Tracks with no genre | they show blank in Mixxx and match no genre rule | selects those tracks |
+| No tags / no crates / no transitions | that layer is empty yet, and what it is for | opens that tab |
+| Transitions pointing outside the library | a mix into a track you do not own | opens the Transitions tab |
+| Tracks with no key | the Camelot wheel and harmonic findings stay half-blind | starts BPM & key analysis |
+| Keys that mix nowhere | 8+ tracks in a key whose neighbouring Camelot keys are empty | selects those tracks |
+| Two genres holding N% of the library | where the collection actually sits | focuses both in the rail |
+| Artists on exactly one track | why the artist layer is thinned | explains the count |
+
+The graph is built by `GET /api/relationships` (read-only; it never writes to
+your library), which accepts `layers=` and `arrangement=`. It is computed in one
+pass over the library — every count is exact, and the panel says out loud when
+it has left weaker links out to stay legible. Two rules keep a 600-track library
+readable: a **node** needs at least two tracks on the artist and album layers
+(one-hit artists are a finding, not 474 dots), and the strongest links win the
+draw — the number left out is printed at the bottom of the panel.
+
 ## Spotify setup (optional, for the downloader)
 
 Want the Spotify-powered downloader? Here's how to switch it on: log in at
@@ -560,15 +621,25 @@ must be running (it is, if you installed the LaunchAgent).
 app.py               Flask application, library APIs, scanning, downloader and DJ-software sync
 usb_export_routes.py USB-export HTTP boundary; delegates to the app-owned exporter service
 usb_export.py        USB-export planning, mounted-volume checks, file writing and job lifecycle
+relationships_routes.py  Relationship-graph HTTP boundary (read-only /api/relationships)
+relationships.py     Node/edge weights, hubs and the findings, computed from the library rows
 static/index.html    Single-page frontend shell and existing application UI (no build step)
 static/tag-utils.js  Tag helpers shared by the UI (parsing, crate rules, genre merge)
 static/usb-export.js USB-export UI controller and progress polling
+static/relationships-layout.js  Rail geometry: layers, widths, Camelot slots, cluster and wheel layout
+static/relationships.js         Relationships rail UI: fetch, canvas drawing, controls, findings
 install.sh           LaunchAgent installer for auto-start
 
 USB export data flows from the UI controller to the Flask blueprint, then to a
 single lazily initialized `USBExporter` stored in `app.extensions`. The service
 is the sole owner of the in-process export job state; routes only parse requests
 and shape responses.
+
+The relationships rail is split the same way: `relationships.py` builds the graph
+from rows (injected `get_db`, `to_camelot` and `crate_song_ids`, so it is testable
+without Flask), `relationships_routes.py` only parses the query string, and the
+drawing is split into the pure geometry in `static/relationships-layout.js` and
+the panel in `static/relationships.js`.
 config.example.json  Sanitized config template
 raycast/spotify-dl.sh  Raycast script: quick download with crate auto-create and #tags
 ```
