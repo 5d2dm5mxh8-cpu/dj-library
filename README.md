@@ -273,6 +273,18 @@ Your library, crates, transitions and settings are all stored outside the code
 folder (`~/.dj-library.db` and `~/.dj-library/config.json`), so updating never
 touches your data.
 
+If you pulled the new code but the running app still behaves like the old one,
+**restart it** — a server that is already running keeps answering with the code
+it started with, even though the page you are looking at came from disk. That is
+what a new feature looks like when half of it has arrived: the panel is there,
+its endpoint is not. The rail says so itself ("the running app is older than this
+page... restart DJ Library") instead of failing quietly. To restart the
+background service without logging out:
+
+```bash
+launchctl kickstart -k gui/$(id -u)/com.milan.djlibrary
+```
+
 ### Something doesn't work?
 
 - The app logs everything to `~/.dj-library/dj-library.log` — the error message
@@ -281,6 +293,9 @@ touches your data.
 - "ModuleNotFoundError" → you missed a package in Step 3.
 - The app opens but shows no songs → `music_dir` in the config points at the
   wrong folder, or the folder has no MP3/WAV/FLAC/M4A files.
+- A new feature is half there (a panel with nothing in it, a button that does
+  nothing) → the running server started before the update. Restart it:
+  `launchctl kickstart -k gui/$(id -u)/com.milan.djlibrary`.
 
 ---
 
