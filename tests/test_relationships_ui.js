@@ -973,6 +973,32 @@ test('an empty library says it is empty rather than pretending', async () => {
   assert.match(shown, /0|nothing|no /i, 'and the counts are honest about there being nothing');
 });
 
+test('the panel and the page agree on the classes the rail writes', () => {
+  // The rail's CSS and its panel were written as separate files, and they had
+  // drifted: findings were emitted as -top/-title/-detail/-acts while the page
+  // styled -h/-txt (so the cards fell back to the browser's 14px body type),
+  // and the empty layer chips carried a bare `empty`, which is the app-wide
+  // empty-pane class -- a centred growing column that inflated the strip.
+  const html = readSource('static/index.html');
+  for (const cls of ['rel-finding-top', 'rel-finding-title', 'rel-finding-detail',
+    'rel-finding-acts']) {
+    assert.ok(html.includes('.' + cls), '.' + cls + ' is styled, as the panel writes it');
+  }
+  for (const gone of ['.rel-finding-h{', '.rel-finding-txt{']) {
+    assert.ok(!html.includes(gone), 'no rule is left for ' + gone);
+  }
+  assert.ok(html.includes('.rel-chip.rel-chip-none{'),
+    'the empty-layer modifier has its own rule');
+});
+
+test('an empty layer chip does not borrow the app-wide empty class', async () => {
+  const rail = await openRail(loadRail());
+  const legend = rail.document.getElementById('relLegend').innerHTML;
+  assert.ok(legend.includes('rel-chip-none'), "empty layers carry the rail's own class");
+  assert.ok(!legend.includes('rel-chip on empty') && !legend.includes('rel-chip empty'),
+    'never the bare `empty`, which the rest of the app styles as a growing column');
+});
+
 // ── the page really carries the rail ─────────────────────────────────────────
 
 test('the rail is part of the page, not a separate screen', () => {

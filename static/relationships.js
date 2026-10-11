@@ -627,7 +627,11 @@ function relRenderLegend() {
       : option.low_weight
         ? option.nodes + ' shown · ' + option.low_weight + ' single-track values kept out of the graph'
         : option.nodes + ' nodes';
-    return '<button type="button" class="rel-chip' + (on ? ' on' : '') + (option.empty ? ' empty' : '') + '"'
+    // `rel-chip-none`, not `empty`: the app already has a global `.empty` rule
+    // for empty panes (a centred growing column), and a bare `empty` on a chip
+    // opted every empty-layer chip into it -- which inflated the whole strip.
+    return '<button type="button" class="rel-chip' + (on ? ' on' : '')
+      + (option.empty ? ' rel-chip-none' : '') + '"'
       + ' style="--rel-chip:' + relEsc(relColorFor(option.key)) + '"'
       + ' data-layer="' + relEsc(option.key) + '" title="' + relEsc(option.label + ' — ' + title) + '"'
       + ' onclick="toggleRelationshipLayer(\'' + relEsc(option.key) + '\')">'

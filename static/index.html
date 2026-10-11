@@ -909,21 +909,22 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
   line-height:1.5}
 .rail-status:empty{display:none}
 .rail-status.bad{color:var(--red)}
-.rail-legend{display:flex;flex-wrap:wrap;gap:4px;padding:8px 12px}
-.rel-chip{display:flex;align-items:center;gap:5px;font-family:var(--mono);font-size:9.5px;
-  padding:4px 8px;border-radius:100px;border:1px solid var(--border);background:transparent;
+/* The legend is a key, so it stays one compact strip of chips: a chip does not
+   stretch to its flex line (which used to make each one 54px tall and the strip
+   128px), and the layer colour rides on the --rel-chip variable the panel
+   already sets, so the dot, the menu row and the graph all read the same. */
+.rail-legend{display:flex;flex-wrap:wrap;align-items:center;gap:4px;padding:7px 12px}
+.rel-chip{align-self:center;display:flex;align-items:center;gap:5px;font-family:var(--mono);
+  font-size:9.5px;line-height:1;padding:4px 8px;border-radius:100px;
+  border:1px solid var(--border);background:transparent;
   color:var(--muted);cursor:pointer;transition:all .15s;white-space:nowrap}
 .rel-chip:hover{border-color:var(--border-strong);color:var(--text2)}
 .rel-chip.on{color:var(--text);border-color:var(--border-strong);background:var(--chip)}
-.rel-chip.empty{opacity:.5;cursor:default}
-.rel-swatch{width:7px;height:7px;border-radius:50%;background:var(--muted2);flex-shrink:0}
-.rel-chip[data-layer="genre"] .rel-swatch,.rel-swatch[data-layer="genre"]{background:var(--rel-genre)}
-.rel-chip[data-layer="tag"] .rel-swatch,.rel-swatch[data-layer="tag"]{background:var(--rel-tag)}
-.rel-chip[data-layer="artist"] .rel-swatch,.rel-swatch[data-layer="artist"]{background:var(--rel-artist)}
-.rel-chip[data-layer="album"] .rel-swatch,.rel-swatch[data-layer="album"]{background:var(--rel-album)}
-.rel-chip[data-layer="crate"] .rel-swatch,.rel-swatch[data-layer="crate"]{background:var(--rel-crate)}
-.rel-chip[data-layer="key"] .rel-swatch,.rel-swatch[data-layer="key"]{background:var(--rel-key)}
-.rel-chip[data-layer="transition"] .rel-swatch,.rel-swatch[data-layer="transition"]{background:var(--rel-transition)}
+.rel-chip.rel-chip-none{opacity:.5;cursor:default}
+/* The count is secondary to the layer's name: same size, quieter colour. */
+.rel-chip b{font-weight:500;color:var(--muted2)}
+.rel-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;margin-top:5px;
+  background:var(--rel-chip,var(--muted2))}
 
 .rail-menu{position:absolute;top:46px;right:10px;z-index:60;width:232px;max-height:300px;
   overflow-y:auto;padding:6px;background-color:var(--modal-bg);border:1px solid var(--border-strong);
@@ -940,7 +941,10 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
 .rail-menu-row .rm-count{margin-left:auto;color:var(--muted);font-size:9.5px;flex-shrink:0}
 .rail-menu-sep{height:1px;background:var(--border);margin:5px 2px}
 
-.rail-body{flex:1;min-height:150px;position:relative;overflow:hidden;
+/* The graph is what the rail is for, so it takes the room the detail card, the
+   legend and the findings list do not need: min-height keeps it a real
+   drawing surface on a short window, and the findings list gives way first. */
+.rail-body{flex:1 1 auto;min-height:240px;position:relative;overflow:hidden;
   border-top:1px solid var(--border);border-bottom:1px solid var(--border);background-color:var(--dg)}
 .rail-body canvas{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:grab}
 .rail-body canvas.dragging{cursor:grabbing}
@@ -964,7 +968,7 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
 .rel-act.danger{border-color:rgba(255,69,58,.45);color:var(--red)}
 .rel-act.danger:hover{background:var(--red-dim);border-color:var(--red);color:var(--red)}
 
-.rail-findings{flex:0 1 auto;max-height:42%;overflow-y:auto;padding:10px 12px;
+.rail-findings{flex:0 1 auto;min-height:0;max-height:28%;overflow-y:auto;padding:10px 12px;
   scrollbar-width:thin;scrollbar-color:var(--scroll) transparent}
 .rail-findings-h{font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;
   color:var(--muted2);margin-bottom:7px}
@@ -972,13 +976,17 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
   border:1px solid var(--border);border-left:2px solid var(--border)}
 .rel-finding.warn{border-left-color:var(--yellow)}
 .rel-finding.info{border-left-color:var(--cyan)}
-.rel-finding-h{display:flex;align-items:flex-start;gap:7px;font-size:11.5px;font-weight:600;
-  line-height:1.4}
-.rel-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;margin-top:5px;background:var(--muted2)}
+/* These four are the classes the panel writes (rel-finding-top / -title /
+   -detail / -acts). They used to be styled as -h and -txt, which no longer
+   existed in the markup: the finding cards were rendering at the browser's
+   default 14px body type instead of the rail's own 10px mono. */
+.rel-finding-top{display:flex;align-items:flex-start;gap:7px;line-height:1.4}
+.rel-finding-title{font-size:11.5px;font-weight:600;line-height:1.4}
 .rel-finding.warn .rel-dot{background:var(--yellow)}
 .rel-finding.info .rel-dot{background:var(--cyan)}
-.rel-finding-txt{font-family:var(--mono);font-size:10px;color:var(--muted);line-height:1.6;
+.rel-finding-detail{font-family:var(--mono);font-size:10px;color:var(--muted);line-height:1.55;
   margin-top:5px;word-break:break-word}
+.rel-finding-acts{display:flex;flex-wrap:wrap;gap:6px;margin-top:7px}
 .rail-empty{font-family:var(--mono);font-size:10px;color:var(--muted2);line-height:1.65;padding:2px 0}
 .rail-footer{flex-shrink:0;padding:8px 12px;border-top:1px solid var(--border);
   font-family:var(--mono);font-size:9.5px;color:var(--muted2);line-height:1.65;word-break:break-word}
