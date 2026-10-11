@@ -270,6 +270,26 @@ function loadRail(options) {
   return context;
 }
 
+// The real endpoint answers a `layers=` request with only those layers' nodes
+// and the edges that survive between them, so the stub has to do the same.
+// Without that, "isolating a layer refetches and shrinks the graph" could pass
+// while the panel quietly kept the whole library on screen. A stub replaces the
+// harness's logging fetch, so it records the urls it was asked for itself.
+function layeredFetch(payload, asked) {
+  return async (url) => {
+    if (asked) asked.push(String(url));
+    const match = /[?&]layers=([^&]*)/.exec(String(url));
+    const layers = match
+      ? LAYER_NAMES.filter((layer) => decodeURIComponent(match[1]).split(',').includes(layer))
+      : null;
+    const nodes = layers ? payload.nodes.filter((node) => layers.includes(node.type)) : payload.nodes;
+    const ids = new Set(nodes.map((node) => node.id));
+    const edges = (layers ? payload.edges.filter((edge) => ids.has(edge.source) && ids.has(edge.target))
+      : payload.edges);
+    return { ok: true, status: 200, json: async () => ({ ...payload, nodes, edges, layers: layers || payload.layers }) };
+  };
+}
+
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 async function openRail(context) {
@@ -560,6 +580,54 @@ test('switching layers refetches and remembers which layers are on', async () =>
     'the layer set is persisted');
 });
 
+test('the … menu isolates the focused layer and really shrinks the graph', async () => {
+  const payload = relationshipPayload();
+  const asked = [];
+  const rail = loadRail({ fetch: layeredFetch(payload, asked) });
+  await openRail(rail);
+  asked.length = 0;
+
+  rail.openRelationshipLayerMenu('more');
+  assert.match(textOf(rail, 'relLayerMenu'), /Show only this layer/,
+    'the control is a row in the … menu, not just a function');
+
+  rail.focusRelationshipNode('crate:warm-up');
+  rail.relShowOnlyFocusedLayer();
+  for (let i = 0; i < 6; i += 1) await tick();
+
+  assert.equal(asked.length, 1, 'isolating a layer refetches the graph exactly once');
+  assert.match(asked[0], /layers=crate(&|$)/, 'and asks the endpoint for that layer alone');
+  assert.deepEqual(Array.from(rail.relState.layers), ['crate'], 'only that layer stays on');
+  assert.deepEqual(Array.from(rail.relState.data.nodes).map((node) => node.id), ['crate:warm-up'],
+    'what comes back is what a one-layer request returns');
+  assert.ok(rail.relState.visible.length < payload.nodes.length, 'so the drawn graph really shrank');
+  assert.equal(rail.relState.menu, null, 'the menu closes behind the choice');
+  assert.equal(textOf(rail, 'relLayerMenu'), '', 'and its popover is emptied and hidden');
+  assert.ok(rail.__writes.some(([key, value]) => key === 'relLayers' && value === 'crate'),
+    'the isolated layer survives a reload');
+});
+
+test('with nothing focused the isolation control picks the heaviest node', async () => {
+  const payload = relationshipPayload();
+  const heaviest = payload.nodes.slice().sort((a, b) => (b.weight || 0) - (a.weight || 0))[0];
+  const asked = [];
+  const rail = loadRail({ fetch: layeredFetch(payload, asked) });
+  await openRail(rail);
+  rail.clearRelationshipFocus();
+  assert.equal(rail.relState.focus, null, 'nothing is focused');
+  asked.length = 0;
+
+  rail.relShowOnlyFocusedLayer();
+  for (let i = 0; i < 6; i += 1) await tick();
+
+  assert.equal(asked.length, 1, 'the choice refetches once');
+  assert.match(asked[0], new RegExp(`layers=${heaviest.type}(&|$)`),
+    'the busiest node decides which layer is kept');
+  assert.deepEqual(Array.from(rail.relState.layers), [heaviest.type]);
+  assert.ok(rail.relState.data.nodes.every((node) => node.type === heaviest.type),
+    'and only that layer is left to draw');
+});
+
 test('the +/-/... controls offer the layers and the arrangements', async () => {
   const rail = loadRail();
   await openRail(rail);
@@ -677,6 +745,72 @@ test('a node card selects the tracks behind that node', async () => {
   const cappedAction = rail.relationshipNodeDetail('genre:house')
     .actions.find((action) => action.kind === 'select-songs');
   assert.match(cappedAction.label, /Select 1 track of 40/);
+});
+
+test('a crate node card names its kind, its share and its links, and opens the crates', async () => {
+  const payload = relationshipPayload();
+  const asked = [];
+  // The shared fixture's crate is manual; a smart one proves the card tells
+  // the two kinds apart instead of calling everything a crate.
+  payload.nodes.push({ id: 'crate:smart-house', type: 'crate', label: 'Smart House', weight: 310,
+    degree: 2, songs: 310, song_ids: [1, 2],
+    detail: { crate_name: 'Smart House', crate_id: 22, smart: true, primary_key: '9A' } });
+  const rail = loadRail({ fetch: layeredFetch(payload, asked) });
+  await openRail(rail);
+
+  rail.focusRelationshipNode('crate:warm-up');
+  for (let i = 0; i < 4; i += 1) await tick();
+  const manual = textOf(rail, 'relDetail');
+  assert.match(manual, /Warm-up/, 'the crate is named');
+  assert.match(manual, /manual crate/, 'and says it is a manual one');
+  assert.match(manual, /12 tracks/, 'with the tracks actually behind it');
+  assert.match(manual, /2% of the library/, 'its share, computed from the library size');
+  assert.match(manual, /1 of 1 drawn/, 'and how many of its links the graph drew');
+
+  const crate = rail.relationshipNodeDetail('crate:warm-up');
+  const select = crate.actions.find((action) => action.kind === 'select-songs');
+  assert.ok(select, 'the crate card can select its members');
+  assert.deepEqual(Array.from(select.song_ids), [4], 'carrying the crate members themselves');
+  rail.runRelationshipAction(select);
+  assert.ok(rail.selectedIds.has(4), 'and the members land in the table selection');
+  rail.runRelationshipAction(crate.actions.find((action) => action.kind === 'open'));
+  assert.equal(rail.__log.tabs[rail.__log.tabs.length - 1], 'crates',
+    'Go to crates opens the crate view by name');
+
+  rail.focusRelationshipNode('crate:smart-house');
+  for (let i = 0; i < 4; i += 1) await tick();
+  const smart = textOf(rail, 'relDetail');
+  assert.match(smart, /smart crate \(rules\)/, 'a smart crate is named as one');
+  assert.match(smart, /310 tracks/, 'with its own count');
+});
+
+test('a transition node card shows the track, its mix links and opens transitions', async () => {
+  const payload = relationshipPayload();
+  // Give the transition node the one drawn link its own layer would carry, so
+  // "how many of its links are drawn" is a real number rather than 0 of 0.
+  payload.edges.push({ id: 'genre:house|transition:ace', source: 'genre:house',
+    target: 'transition:ace', type: 'genre-transition', weight: 2 });
+  const rail = loadRail({ fetch: layeredFetch(payload) });
+  await openRail(rail);
+
+  rail.focusRelationshipNode('transition:ace');
+  for (let i = 0; i < 4; i += 1) await tick();
+  const detail = textOf(rail, 'relDetail');
+  assert.match(detail, /Ace — Sharam Jey/, 'the track is named, not just its id');
+  assert.match(detail, /Sharam Jey/, 'the artist is on the card');
+  assert.match(detail, /Mix links/, 'and how many mix links that track has');
+  assert.match(detail, /1 of 1 drawn/, 'plus how many of them the graph drew');
+  assert.doesNotMatch(detail, /% of the library/,
+    'one track does not claim a share of the library');
+
+  const node = rail.relationshipNodeDetail('transition:ace');
+  const select = node.actions.find((action) => action.kind === 'select-songs');
+  assert.deepEqual(Array.from(select.song_ids), [9], 'the card carries that one track');
+  rail.runRelationshipAction(select);
+  assert.ok(rail.selectedIds.has(9), 'and selecting it reaches the table');
+  rail.runRelationshipAction(node.actions.find((action) => action.kind === 'open'));
+  assert.equal(rail.__log.tabs[rail.__log.tabs.length - 1], 'transitions',
+    'Go to transitions opens the transitions view by name');
 });
 
 test('a redraw does not wipe what the panel just said', async () => {
