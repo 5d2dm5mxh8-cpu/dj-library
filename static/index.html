@@ -126,11 +126,26 @@ body{
   color:var(--text);font-family:var(--ui);font-size:14px;-webkit-font-smoothing:antialiased;
   height:100vh;display:grid;position:relative;
   grid-template-rows:54px 46px 1fr;
-  grid-template-columns:var(--sidebar-w,288px) 7px 1fr;
-  grid-template-areas:"header header header""filters filters filters""sidebar gutter main";
+  grid-template-columns:var(--sidebar-w,288px) 7px 1fr var(--rail-gutter,0px) var(--rail-w,0px);
+  grid-template-areas:"header header header header header""filters filters filters filters filters""sidebar gutter main railgutter rail";
   overflow:hidden;
   background:var(--bg);
 }
+
+/* RELATIONSHIPS RAIL -- state of the right-hand rail.
+   Only JS-written property is --rail-w-set (the width the user dragged to);
+   --rail-w / --rail-gutter are mapped from it per state, so hide, maximise and
+   show are pure CSS and no inline style can fight the layout. With no
+   data-rail attribute -- i.e. before the script runs -- both are 0, so the
+   library keeps the full width and nothing shifts on first paint. */
+body[data-rail="open"]{--rail-gutter:7px;--rail-w:var(--rail-w-set,420px)}
+body[data-rail="hidden"],body[data-rail="max"]{--rail-gutter:0px;--rail-w:0px}
+/* Maximised: the rail leaves the grid and covers the library, sidebar intact. */
+body[data-rail="max"] .rail{position:fixed;top:100px;bottom:0;right:0;
+  left:calc(var(--sidebar-w,288px) + 7px);z-index:44;box-shadow:var(--shadow-3)}
+body[data-rail="hidden"] .rail-gutter,body[data-rail="max"] .rail-gutter{display:none}
+/* The floating player docks to the right of the open rail instead of under it. */
+body[data-rail="open"] .player-bar{right:calc(var(--rail-w-set,420px) + 7px + 16px)}
 
 /* HEADER -- flat chrome band; the hairline underneath is the only edge */
 header{grid-area:header;
@@ -832,6 +847,147 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
   :root{--border:rgba(255,255,255,.22);--border-strong:rgba(255,255,255,.36)}
   [data-theme="light"]{--border:rgba(0,0,0,.25);--border-strong:rgba(0,0,0,.42)}
 }
+
+/* ── RELATIONSHIPS RAIL ──────────────────────────────────────────────────────
+   The graph panel: genres, tags, artists, albums, crates, keys and transitions
+   as node types, drawn on a canvas by static/relationships.js. Node colours are
+   custom properties so the renderer stays theme-agnostic (it reads them with
+   getComputedStyle). */
+:root{
+  --rail-w-set:420px;                  /* JS overrides this on drag */
+  --rel-genre:var(--cyan);
+  --rel-tag:var(--purple);
+  --rel-artist:var(--green);
+  --rel-album:var(--yellow);
+  --rel-crate:#ff9f0a;
+  --rel-key:#ff6b3d;
+  --rel-transition:#8e8e99;
+}
+[data-theme="light"]{
+  --rel-crate:#c25f06;
+  --rel-key:#c0392b;
+  --rel-transition:#7b7b85;
+}
+
+.rail-gutter{grid-area:railgutter;position:relative;cursor:col-resize;z-index:5}
+.rail-gutter::after{content:"";position:absolute;top:0;bottom:0;left:50%;width:2px;
+  transform:translateX(-50%);background:var(--cyan);opacity:0;transition:opacity .15s}
+.rail-gutter:hover::after,.rail-gutter.dragging::after{opacity:.45}
+.rail-gutter.dragging::after{opacity:.7}
+
+.rail{grid-area:rail;background-color:var(--surface);border-left:1px solid var(--border);
+  display:flex;flex-direction:column;overflow:hidden;min-width:0;position:relative}
+/* The header wraps instead of clipping: at the rail's narrowest width the title,
+   the two arrangement pills and six buttons do not fit on one line, and a
+   maximise or hide button that has been cut off is a control the user cannot
+   reach. min-height keeps the single-line case the same height as before. */
+.rail-hdr{display:flex;align-items:center;flex-wrap:wrap;gap:6px;row-gap:4px;
+  padding:6px 10px;min-height:44px;flex-shrink:0;
+  border-bottom:1px solid var(--border)}
+.rail-title{font-family:var(--mono);font-size:10.5px;font-weight:700;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--text);white-space:nowrap}
+.rail-arr{display:flex;gap:3px;margin-left:auto;flex-shrink:0}
+.rail-pill{font-family:var(--mono);font-size:9.5px;padding:4px 8px;border-radius:100px;
+  border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;
+  transition:all .15s;white-space:nowrap}
+.rail-pill:hover{border-color:var(--border-strong);color:var(--text)}
+.rail-pill.on{background:var(--purple-dim);border-color:var(--purple);color:var(--purple)}
+.rail-tools{display:flex;gap:3px;flex-shrink:0}
+.rail-btn{width:24px;height:24px;border-radius:7px;background:var(--chip);padding:0;
+  border:1px solid var(--border);color:var(--muted);font-family:var(--mono);font-size:11px;
+  line-height:1;cursor:pointer;display:grid;place-items:center;transition:all .15s}
+.rail-btn:hover{background:var(--chip-2);color:var(--text);border-color:var(--border-strong)}
+.rail-btn:active{transform:scale(.92)}
+.rail-btn.on{background:var(--purple-dim);border-color:var(--purple);color:var(--purple)}
+.rail-btn-x:hover{background:var(--red-dim);border-color:var(--red);color:var(--red)}
+
+.rail-summary{font-family:var(--mono);font-size:9.5px;color:var(--muted);
+  padding:9px 12px 0;line-height:1.65}
+.rail-summary b{color:var(--text2)}
+/* The panel's one voice for outcomes: what it just did, or why it could not. */
+.rail-status{font-family:var(--mono);font-size:9.5px;color:var(--muted2);padding:0 12px 6px;
+  line-height:1.5}
+.rail-status:empty{display:none}
+.rail-status.bad{color:var(--red)}
+.rail-legend{display:flex;flex-wrap:wrap;gap:4px;padding:8px 12px}
+.rel-chip{display:flex;align-items:center;gap:5px;font-family:var(--mono);font-size:9.5px;
+  padding:4px 8px;border-radius:100px;border:1px solid var(--border);background:transparent;
+  color:var(--muted);cursor:pointer;transition:all .15s;white-space:nowrap}
+.rel-chip:hover{border-color:var(--border-strong);color:var(--text2)}
+.rel-chip.on{color:var(--text);border-color:var(--border-strong);background:var(--chip)}
+.rel-chip.empty{opacity:.5;cursor:default}
+.rel-swatch{width:7px;height:7px;border-radius:50%;background:var(--muted2);flex-shrink:0}
+.rel-chip[data-layer="genre"] .rel-swatch,.rel-swatch[data-layer="genre"]{background:var(--rel-genre)}
+.rel-chip[data-layer="tag"] .rel-swatch,.rel-swatch[data-layer="tag"]{background:var(--rel-tag)}
+.rel-chip[data-layer="artist"] .rel-swatch,.rel-swatch[data-layer="artist"]{background:var(--rel-artist)}
+.rel-chip[data-layer="album"] .rel-swatch,.rel-swatch[data-layer="album"]{background:var(--rel-album)}
+.rel-chip[data-layer="crate"] .rel-swatch,.rel-swatch[data-layer="crate"]{background:var(--rel-crate)}
+.rel-chip[data-layer="key"] .rel-swatch,.rel-swatch[data-layer="key"]{background:var(--rel-key)}
+.rel-chip[data-layer="transition"] .rel-swatch,.rel-swatch[data-layer="transition"]{background:var(--rel-transition)}
+
+.rail-menu{position:absolute;top:46px;right:10px;z-index:60;width:232px;max-height:300px;
+  overflow-y:auto;padding:6px;background-color:var(--modal-bg);border:1px solid var(--border-strong);
+  border-radius:10px;box-shadow:var(--shadow-float);scrollbar-width:thin;
+  scrollbar-color:var(--scroll) transparent}
+.rail-menu[hidden]{display:none}
+.rail-menu-head{font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--muted2);padding:6px 8px 3px}
+.rail-menu-row{display:flex;align-items:center;gap:8px;width:100%;background:transparent;border:none;
+  color:var(--text2);font-family:var(--mono);font-size:10.5px;padding:7px 8px;border-radius:7px;
+  cursor:pointer;text-align:left;transition:background .15s}
+.rail-menu-row:hover{background:var(--chip-2);color:var(--text)}
+.rail-menu-row.on{color:var(--text)}
+.rail-menu-row .rm-count{margin-left:auto;color:var(--muted);font-size:9.5px;flex-shrink:0}
+.rail-menu-sep{height:1px;background:var(--border);margin:5px 2px}
+
+.rail-body{flex:1;min-height:150px;position:relative;overflow:hidden;
+  border-top:1px solid var(--border);border-bottom:1px solid var(--border);background-color:var(--dg)}
+.rail-body canvas{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:grab}
+.rail-body canvas.dragging{cursor:grabbing}
+.rel-tip{position:absolute;z-index:5;pointer-events:none;padding:5px 8px;max-width:232px;
+  background-color:var(--modal-bg);border:1px solid var(--border-strong);border-radius:8px;
+  box-shadow:var(--shadow-float);font-family:var(--mono);font-size:10px;color:var(--text);
+  line-height:1.5;white-space:pre-line}
+.rel-tip[hidden]{display:none}
+
+.rail-detail{flex-shrink:0;padding:9px 12px;background-color:var(--dg);
+  border-bottom:1px solid var(--border)}
+.rail-detail[hidden]{display:none}
+.rel-detail-title{display:flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600}
+.rel-detail-sub{font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:4px;line-height:1.6;
+  word-break:break-word}
+.rel-acts{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.rel-act{background:var(--chip);border:1px solid var(--border);color:var(--text2);border-radius:7px;
+  font-family:var(--mono);font-size:9.5px;padding:4px 9px;cursor:pointer;transition:all .15s}
+.rel-act:hover{border-color:var(--cyan);color:var(--cyan);background:var(--cyan-dim)}
+.rel-act:active{transform:scale(.95)}
+.rel-act.danger{border-color:rgba(255,69,58,.45);color:var(--red)}
+.rel-act.danger:hover{background:var(--red-dim);border-color:var(--red);color:var(--red)}
+
+.rail-findings{flex:0 1 auto;max-height:42%;overflow-y:auto;padding:10px 12px;
+  scrollbar-width:thin;scrollbar-color:var(--scroll) transparent}
+.rail-findings-h{font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--muted2);margin-bottom:7px}
+.rel-finding{padding:8px 10px;margin-bottom:7px;border-radius:9px;background-color:var(--dg);
+  border:1px solid var(--border);border-left:2px solid var(--border)}
+.rel-finding.warn{border-left-color:var(--yellow)}
+.rel-finding.info{border-left-color:var(--cyan)}
+.rel-finding-h{display:flex;align-items:flex-start;gap:7px;font-size:11.5px;font-weight:600;
+  line-height:1.4}
+.rel-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;margin-top:5px;background:var(--muted2)}
+.rel-finding.warn .rel-dot{background:var(--yellow)}
+.rel-finding.info .rel-dot{background:var(--cyan)}
+.rel-finding-txt{font-family:var(--mono);font-size:10px;color:var(--muted);line-height:1.6;
+  margin-top:5px;word-break:break-word}
+.rail-empty{font-family:var(--mono);font-size:10px;color:var(--muted2);line-height:1.65;padding:2px 0}
+.rail-footer{flex-shrink:0;padding:8px 12px;border-top:1px solid var(--border);
+  font-family:var(--mono);font-size:9.5px;color:var(--muted2);line-height:1.65;word-break:break-word}
+
+/* Header button that opens the rail -- same shape as the Install button,
+   tinted with the rail's own colour so it reads as a different kind of thing. */
+.rel-open{color:var(--purple);background:var(--purple-dim);border-color:var(--purple)}
+.rel-open:hover{background:var(--purple);color:var(--on-accent)}
+.rel-open.on{background:var(--purple);color:var(--on-accent)}
 </style>
 </head>
 <body>
@@ -851,6 +1007,8 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
     <option value="added_at">Sort: Date added (newest first)</option>
   </select>
   <button class="pwa-install" id="transTryBtn" onclick="showTab('transitions')" style="display:none;margin-right:6px" title="Transitions marked “to try” — untested mixes awaiting a live check">🧪&nbsp;<span id="transTryCount">0</span> to try</button>
+  <button class="pwa-install rel-open" id="relOpenBtn" onclick="openRelationships()"
+    title="Relationships — graph your genres, tags, artists, albums, crates, keys and transitions">◇&nbsp;Relationships</button>
   <button class="pwa-install" id="installBtn" onclick="installPwa()" style="display:none" title="Install DJ Library as an app">⧉&nbsp;Install App</button>
   <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()"
     aria-label="Toggle light or dark mode" title="Toggle light or dark mode"></button>
@@ -1385,6 +1543,47 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
   </div>
 </main>
 
+<!-- RELATIONSHIPS RAIL -- the right-hand graph of genres, tags, artists,
+     albums, crates, keys and transitions. Geometry lives in
+     static/relationships-layout.js, the panel and renderer in
+     static/relationships.js; the markup here is only the frame it fills. -->
+<div class="rail-gutter" id="relGutter" title="Drag to resize the rail — double-click to reset"></div>
+
+<aside class="rail" id="relRail" aria-label="Relationships">
+  <div class="rail-hdr">
+    <div class="rail-title">◇ Relationships</div>
+    <div class="rail-arr">
+      <button class="rail-pill" id="relArrClusters" onclick="setRelationshipsArrangement('clusters')"
+        title="Cluster every layer into its own region">Clusters</button>
+      <button class="rail-pill" id="relArrWheel" onclick="setRelationshipsArrangement('wheel')"
+        title="Put the keys on the Camelot wheel and orbit everything else around them">Wheel</button>
+    </div>
+    <div class="rail-tools">
+      <button class="rail-btn" id="relAddBtn" onclick="openRelationshipLayerMenu('add')"
+        title="Add a layer">+</button>
+      <button class="rail-btn" id="relRemoveBtn" onclick="openRelationshipLayerMenu('remove')"
+        title="Remove a layer">−</button>
+      <button class="rail-btn" id="relMoreBtn" onclick="openRelationshipLayerMenu('more')"
+        title="More — arrangement, node sizes, reset">…</button>
+      <button class="rail-btn" id="relMaxBtn" onclick="toggleRelationshipsMaximise()"
+        title="Maximise or restore the rail">⤢</button>
+      <button class="rail-btn rail-btn-x" id="relHideBtn" onclick="hideRelationships()"
+        title="Hide the rail">✕</button>
+    </div>
+  </div>
+  <div class="rail-summary" id="relSummary">Loading…</div>
+  <div class="rail-status" id="relStatus"></div>
+  <div class="rail-menu" id="relLayerMenu" hidden></div>
+  <div class="rail-legend" id="relLegend"></div>
+  <div class="rail-body" id="relBody">
+    <canvas id="relCanvas"></canvas>
+    <div class="rel-tip" id="relTooltip" hidden></div>
+  </div>
+  <div class="rail-detail" id="relDetail" hidden></div>
+  <div class="rail-findings" id="relFindings"></div>
+  <div class="rail-footer" id="relFooter"></div>
+</aside>
+
 <!-- INFO / BATCH EDIT MODAL -->
 <div class="modal-bd" id="infoModal">
   <div class="modal modal-w">
@@ -1738,6 +1937,8 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
 
 <script src="/static/tag-utils.js"></script>
 <script src="/static/usb-export.js"></script>
+<script src="/static/relationships-layout.js"></script>
+<script src="/static/relationships.js"></script>
 <script>
 // MUSIC_DIR is overwritten from /api/config at startup (config.json is the
 // single source of truth) -- the value below is only a fallback if that fetch fails.
