@@ -4367,6 +4367,123 @@ def get_transitions(song_id):
     return jsonify({'outgoing': [dict(r) for r in outgoing],
                     'incoming': [dict(r) for r in incoming]})
 
+@app.route('/api/songs/<int:song_id>/transition-tree')
+def get_transition_tree(song_id):
+    """One song's onward mix path as a tree: the selected song plus every
+    outgoing transition followed out to `depth` hops (query param, default 3,
+    clamped to 1-5). Each node carries the song metadata the tree shows
+    (name, bpm, key) and each hop carries its edge notes (notes/tag/status).
+    Text-only targets are leaves; cycles end in a `revisit` stub instead of
+    recursing forever. A node that still has outgoing transitions beyond what
+    was expanded reports `has_more` so the tree can offer a deeper branch
+    instead of a false dead end; `exclude` (comma separated song ids) folds
+    extra ids into the visited set so a branch expanded on its own still ends
+    cycles the same way. Caps keep a dense library fast: 10 hops per song
+    and 60 songs per tree (extra hops report `truncated`)."""
+    try:
+        depth = int(request.args.get('depth', 3))
+    except (TypeError, ValueError):
+        depth = 3
+    depth = max(1, min(5, depth))
+    try:
+        excluded = {int(p) for p in
+                    str(request.args.get('exclude') or '').replace(',', ' ').split()}
+    except (TypeError, ValueError):
+        excluded = set()
+    CHILD_LIMIT = 10
+    NODE_LIMIT = 60
+    with get_db() as db:
+        root = db.execute('SELECT id, title, artist, filename, bpm, musical_key '
+                          'FROM songs WHERE id=?', (song_id,)).fetchone()
+        if not root:
+            return jsonify({'error': 'Song not found'}), 404
+        state = {'count': 0, 'truncated': False}
+
+        def song_node(row):
+            return {'kind': 'song', 'id': row['id'], 'title': row['title'],
+                    'artist': row['artist'], 'filename': row['filename'],
+                    'bpm': row['bpm'], 'musical_key': row['musical_key']}
+
+        def build(current_id, remaining, ancestors):
+            row = db.execute('SELECT id, title, artist, filename, bpm, musical_key '
+                             'FROM songs WHERE id=?', (current_id,)).fetchone()
+            if not row:
+                return None
+            state['count'] += 1
+            node = song_node(row)
+            node['children'] = []
+            node['has_more'] = False
+            node['truncated'] = False
+            node['omitted'] = 0
+            if remaining <= 0:
+                node['has_more'] = bool(db.execute(
+                    'SELECT 1 FROM transitions WHERE from_song_id=? LIMIT 1',
+                    (current_id,)).fetchone())
+                return node
+            hops = db.execute('''SELECT t.id, t.to_song_id, t.to_text, t.notes, t.tag,
+                    t.status, t.is_mashup_track, t.mashup_input_song_id,
+                    t.mashup_input_text,
+                    s.title AS to_title, s.artist AS to_artist,
+                    s.filename AS to_filename, s.bpm AS to_bpm,
+                    s.musical_key AS to_key,
+                    mis.title AS mi_title, mis.artist AS mi_artist,
+                    mis.filename AS mi_filename, mis.bpm AS mi_bpm,
+                    mis.musical_key AS mi_key
+                FROM transitions t
+                LEFT JOIN songs s ON s.id = t.to_song_id
+                LEFT JOIN songs mis ON mis.id = t.mashup_input_song_id
+                WHERE t.from_song_id = ?
+                ORDER BY t.created_at, t.id''', (current_id,)).fetchall()
+            children = []
+            for hop in hops[:CHILD_LIMIT]:
+                edge = {'transition_id': hop['id'], 'notes': hop['notes'],
+                        'tag': hop['tag'], 'status': hop['status'],
+                        'is_mashup_track': bool(hop['is_mashup_track']),
+                        'mashup_input_song_id': hop['mashup_input_song_id'],
+                        'mashup_input_text': hop['mashup_input_text'],
+                        'mashup_input_title': hop['mi_title'],
+                        'mashup_input_artist': hop['mi_artist'],
+                        'mashup_input_filename': hop['mi_filename'],
+                        'mashup_input_bpm': hop['mi_bpm'],
+                        'mashup_input_key': hop['mi_key']}
+                target_id = hop['to_song_id']
+                if not target_id:
+                    edge['target'] = {'kind': 'text',
+                                      'text': hop['to_text'] or 'Untitled track'}
+                elif target_id in ancestors:
+                    edge['target'] = {'kind': 'song', 'id': target_id,
+                                      'title': hop['to_title'],
+                                      'artist': hop['to_artist'],
+                                      'filename': hop['to_filename'],
+                                      'bpm': hop['to_bpm'],
+                                      'musical_key': hop['to_key'],
+                                      'revisit': True, 'has_more': False,
+                                      'children': []}
+                elif state['count'] >= NODE_LIMIT:
+                    state['truncated'] = True
+                    edge['target'] = {'kind': 'song', 'id': target_id,
+                                      'title': hop['to_title'],
+                                      'artist': hop['to_artist'],
+                                      'filename': hop['to_filename'],
+                                      'bpm': hop['to_bpm'],
+                                      'musical_key': hop['to_key'],
+                                      'truncated': True, 'has_more': True,
+                                      'children': []}
+                else:
+                    child = build(target_id, remaining - 1, ancestors | {target_id})
+                    if child is None:
+                        continue
+                    edge['target'] = child
+                children.append(edge)
+            node['children'] = children
+            node['truncated'] = len(hops) > len(children)
+            node['omitted'] = len(hops) - len(children)
+            return node
+        tree = build(song_id, depth, {song_id} | excluded)
+        tree['depth'] = depth
+        tree['tree_truncated'] = state['truncated']
+        return jsonify(tree)
+
 @app.route('/api/songs/<int:song_id>/transitions', methods=['POST'])
 def add_transition(song_id):
     """Creates a transition from song_id to either a library song (to_song_id)
