@@ -747,6 +747,73 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width
 .ts-edit{flex:1;min-width:0;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
 .ts-empty{font-family:var(--mono);font-size:10.5px;color:var(--muted2);padding:4px 2px;line-height:1.5}
 
+/* mix-path tree: one signal spine down the left, each hop a stop on the route */
+.tr-tree{margin-top:16px}
+.tr-depth{display:flex;gap:4px;align-items:center}
+.tr-depth button,.tr-more button{font-family:var(--mono);font-size:10px;min-width:24px;padding:3px 7px;
+  border-radius:100px;border:1px solid var(--border);background:transparent;color:var(--muted);
+  cursor:pointer;transition:all .12s}
+.tr-depth button:hover,.tr-more button:hover{background:var(--chip-2);color:var(--text)}
+.tr-depth button.on{background:var(--cyan-dim);border-color:var(--cyan);color:var(--cyan)}
+.tr-more{margin:6px 0 4px}
+.tr-more button{padding:4px 11px}
+.tr-more .tr-load,.tr-more .tr-err{padding:2px}
+.tr-depth button:focus-visible,.tr-more button:focus-visible,.tr-node:focus-visible,
+.tr-jump:focus-visible,.tr-branch>summary:focus-visible{
+  outline:2px solid var(--cyan);outline-offset:2px}
+.tr-root{margin:10px 0 2px;padding:9px 11px;border:1px solid var(--border-strong);
+  border-radius:12px;background:var(--surface2)}
+.tr-spine{position:relative;margin:0;padding:6px 0 2px 18px}
+.tr-spine::before{content:'';position:absolute;left:5px;top:10px;bottom:10px;width:2px;
+  border-radius:2px;background:var(--cyan);opacity:.55}
+.tr-hop{position:relative;margin:0 0 2px;padding:0}
+.tr-hop::before{content:'';position:absolute;left:-17px;top:14px;width:8px;height:8px;
+  border-radius:50%;background:var(--bg);border:2px solid var(--cyan)}
+.tr-hop.tr-totry::before{border-style:dashed}
+.tr-hop.tr-textleaf::before{background:transparent;border-style:dotted}
+.tr-edge{font-family:var(--mono);font-size:10.5px;color:var(--muted);font-style:italic;
+  margin:8px 0 3px;line-height:1.45;overflow:hidden;text-overflow:ellipsis;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;white-space:normal}
+.tr-edge .tr-tag{font-style:normal}
+.tr-branch{margin:0;padding:0}
+.tr-branch>summary{list-style:none;cursor:pointer;display:block;border-radius:10px}
+.tr-branch>summary::-webkit-details-marker{display:none}
+.tr-branch>summary:hover .tr-node{border-color:var(--border-strong);background:var(--hover)}
+.tr-kids{margin:0;padding:4px 0 2px 18px;position:relative}
+.tr-kids::before{content:'';position:absolute;left:5px;top:6px;bottom:8px;width:2px;
+  border-radius:2px;background:var(--cyan);opacity:.35}
+.tr-node{display:flex;align-items:center;gap:8px;width:100%;text-align:left;
+  padding:7px 10px;border-radius:10px;background:var(--dg);border:1px solid var(--border);
+  cursor:pointer;transition:background .12s,border-color .12s;color:var(--text)}
+button.tr-node:hover{background:var(--hover);border-color:var(--border-strong)}
+div.tr-node{cursor:default}
+div.tr-node:hover{background:var(--dg)}
+.tr-node.topline{font-family:var(--ui)}
+.tr-tt{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  flex:1;min-width:0}
+.tr-jump{cursor:pointer;border-radius:6px}
+.tr-jump:hover{color:var(--cyan)}
+.tr-jump:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+.tr-tt .tr-art{font-weight:400;font-size:11.5px;color:var(--muted)}
+.tr-chips{display:flex;gap:4px;flex-shrink:0;align-items:center}
+.tr-chip{font-family:var(--mono);font-size:10px;padding:1px 7px;border-radius:100px;
+  white-space:nowrap}
+.tr-bpm{background:var(--cyan-dim);color:var(--cyan);border:1px solid rgba(56,226,255,.35)}
+.tr-key{background:var(--purple-dim);color:var(--purple);border:1px solid rgba(191,90,242,.4)}
+.tr-flag{font-family:var(--mono);font-size:9px;padding:1px 7px;border-radius:100px;
+  white-space:nowrap;flex-shrink:0}
+.tr-try{background:transparent;color:var(--muted2);border:1px dashed var(--border-strong)}
+.tr-visit{background:var(--chip);color:var(--muted);border:1px solid var(--border)}
+.tr-caret{font-family:var(--mono);font-size:10px;color:var(--muted2);flex-shrink:0;
+  width:14px;text-align:center;user-select:none}
+.tr-branch:not([open]) .tr-caret{transform:rotate(-90deg)}
+.tr-load,.tr-err{font-family:var(--mono);font-size:10.5px;color:var(--muted2);padding:8px 2px}
+.tr-err button{margin-left:8px}
+@media (max-width:560px){.tr-spine,.tr-kids{padding-left:12px}
+  .tr-hop::before{left:-11px}}
+@media (prefers-reduced-motion:reduce){.tr-node,.tr-depth button,.tr-branch>summary{
+  transition:none!important}}
+
 /* transition tag combobox: a .ii input plus its autocomplete menu. Existing
    tags are suggested as you type; a green "Create" row offers the new one. */
 .tag-combo{position:relative;display:inline-flex;flex-shrink:0}
@@ -4359,7 +4426,187 @@ async function renderTransitionsSection(songId){
     <div class="ts-group-label">From this song (${out.length})</div>
     ${outHtml}
     <div class="ts-group-label">Into this song (${inc.length})</div>
-    ${incHtml}`;
+    ${incHtml}
+    <div class="tr-tree" id="transTree">
+      ${transTreeHdr(songId)}
+      <div class="tr-load">Tracing the mix path…</div>
+    </div>`;
+  renderTransitionTree(songId);
+}
+
+// Single builder for the tree header (skeleton + rerender share it), with one
+// button per depth the endpoint accepts (1–5, persisted).
+function transTreeHdr(songId, depth){
+  const cur=depth||transTreeDepth();
+  return `<div class="ts-hdr" style="margin-top:16px">
+      <span class="ts-title">Mix path from this song</span>
+      <span class="tr-depth" role="group" aria-label="Mix path depth">
+        ${[1,2,3,4,5].map(d=>`<button class="${cur===d?'on':''}" onclick="setTransTreeDepth(${songId},${d})" title="Follow mixes ${d} hop${d===1?'':'s'} out">${d}</button>`).join('')}
+      </span>
+    </div>`;
+}
+
+// BPM + key chips for one stop; empty when the song carries neither, so a
+// keyless track leaves no hollow shell behind.
+function transTreeChips(bpmRaw, keyRaw){
+  const bpm=bpmRaw!=null&&bpmRaw!==''?Math.round(Number(bpmRaw)*10)/10:null;
+  const key=displayKey(keyRaw);
+  if(bpm==null&&!key) return '';
+  return `<span class="tr-chips">${bpm!=null?`<span class="tr-chip tr-bpm">${esc(String(bpm))}</span>`:''}${key?`<span class="tr-chip tr-key">${esc(key)}</span>`:''}</span>`;
+}
+
+// Subtree URL for expanding one branch on its own; ancestors ride along so a
+// branch fetched solo still ends cycles the way the full tree would.
+function transTreeSubUrl(nodeId, ancestors){
+  const ex=[...new Set((ancestors||[]).map(String))].filter(a=>a&&a!=='undefined').join(',');
+  return `/api/songs/${nodeId}/transition-tree?depth=3${ex?`&exclude=${encodeURIComponent(ex)}`:''}`;
+}
+
+// Depth of the mix-path tree (persisted); the endpoint clamps to 1–5.
+function transTreeDepth(){
+  let d=3;
+  try{ d=parseInt(localStorage.getItem('transTreeDepth')||'3',10)||3; }catch(e){}
+  return Math.max(1,Math.min(5,d));
+}
+function setTransTreeDepth(songId, d){
+  try{ localStorage.setItem('transTreeDepth',String(d)); }catch(e){}
+  renderTransitionTree(songId);
+}
+
+// Mix-path tree: one fetch for the whole subtree, then a native
+// <details>-per-branch render so expand/collapse needs no extra state.
+async function renderTransitionTree(songId){
+  const mount=document.getElementById('transTree');
+  if(!mount||!songId) return;
+  const depth=transTreeDepth();
+  window._transTreeRoot=songId;
+  // Overlapping renders (depth toggle, song switch) share one mount: only
+  // the latest request for the current song may write into it.
+  const req=(window._transTreeSeq=(window._transTreeSeq||0)+1);
+  window._transTreeLive={song:songId,req};
+  const live=()=>{const l=window._transTreeLive;return !!l&&l.song===songId&&l.req===req;};
+  let tree;
+  try{
+    const resp=await fetch(`/api/songs/${songId}/transition-tree?depth=${depth}`);
+    tree=await resp.json();
+    if(!resp.ok||tree.error) throw new Error(tree.error||('HTTP '+resp.status));
+  }catch(e){
+    if(!live()) return;
+    mount.querySelector('.tr-load')?.remove();
+    if(!live()||!mount.isConnected) return;
+    if(!mount.querySelector('.tr-err'))
+      mount.insertAdjacentHTML('beforeend',
+        `<div class="tr-err">Could not trace the mix path.<button class="btn-sel" onclick="renderTransitionTree(${songId})">Retry</button></div>`);
+    return;
+  }
+  if(!live()||!mount.isConnected) return;
+  const kids=(tree.children||[]);
+  const hdr=transTreeHdr(songId,depth);
+  if(!kids.length){
+    mount.innerHTML=hdr+transTreeRootHtml(tree)+`<div class="ts-empty">No onward mixes — add the first hop with + Add.</div>`;
+    return;
+  }
+  mount.innerHTML=hdr
+    +transTreeRootHtml(tree)
+    +transTreeOmittedHtml(tree.omitted,kids.length)
+    +`<div class="tr-spine">${kids.map(c=>transTreeEdgeHtml(c,0)).join('')}</div>`
+    +(tree.tree_truncated?`<div class="ts-empty">Showing the first 60 stops — narrow the path with + Add notes or a deeper branch.</div>`:'');
+}
+
+// Root card: the selected song itself (name · bpm · key).
+function transTreeRootHtml(node){
+  return `<div class="tr-root tr-node topline" aria-current="true">
+    <span class="tr-tt">${esc(node.title||node.filename||'Untitled')}
+      <span class="tr-art">— ${esc(node.artist||'—')}</span></span>
+    ${transTreeChips(node.bpm,node.musical_key)}
+  </div>`;
+}
+
+// Honest count where the per-song cap hides hops: the first `shown` are
+// drawn, `omitted` more exist. Shared by the root card and capped branches.
+function transTreeOmittedHtml(omitted, shown){
+  if(!(omitted>0)) return '';
+  return `<div class="ts-empty">…plus ${omitted} more mix${omitted===1?'':'es'} — showing the first ${shown}.</div>`;
+}
+
+// Loads one branch's next hops and splices them in below the stop. Ancestor
+// stops are read off the surrounding branches so cycles still end instead of
+// duplicating stops already on the path; failures restore the button.
+async function expandTransTreeBranch(nodeId, level, btn){
+  const box=btn?btn.closest('.tr-more'):null;
+  const seen=new Set([String(window._transTreeRoot||'')]);
+  let el=btn||null;
+  while(el){
+    const det=el.closest?el.closest('details.tr-branch'):null;
+    if(!det) break;
+    if(det.dataset.node) seen.add(String(det.dataset.node));
+    el=det.parentElement;
+  }
+  if(box) box.innerHTML='<div class="tr-load">Loading more…</div>';
+  let sub;
+  try{
+    const resp=await fetch(transTreeSubUrl(nodeId,[...seen]));
+    sub=await resp.json();
+    if(!resp.ok||sub.error) throw new Error(sub.error||('HTTP '+resp.status));
+  }catch(e){
+    if(box) box.innerHTML=`<div class="tr-err">Could not load more.<button class="btn-sel" onclick="expandTransTreeBranch(${nodeId},${level},this)">Retry</button></div>`;
+    return;
+  }
+  const kids=(sub.children||[]);
+  const html=kids.length?kids.map(c=>transTreeEdgeHtml(c,level+1)).join('')
+    :'<div class="ts-empty">No further mixes from here.</div>';
+  if(box) box.outerHTML=`<div class="tr-kids">${html}</div>`;
+}
+
+// One hop: the transition notes written along the wire, then the target stop.
+function transTreeEdgeHtml(edge, level){
+  const label=(edge.notes||edge.tag)
+    ? `<div class="tr-edge">→${edge.notes?` “${esc(edge.notes)}”`:''}${edge.tag?` <span class="tr-tag ts-tag">${esc(edge.tag)}</span>`:''}</div>`
+    : '';
+  const trying=edge.status==='to_try'?' tr-totry':'';
+  const leaf=edge.target&&edge.target.kind==='text'?' tr-textleaf':'';
+  return `<div class="tr-hop${trying}${leaf}">${label}${transTreeNodeHtml(edge,level)}</div>`;
+}
+
+// One stop: clickable song button (name · bpm · key · notes live on the edge
+// above), hollow text leaf, or a ↺ visited stub that ends a cycle.
+function transTreeNodeHtml(edge, level){
+  const t=edge.target||{};
+  if(t.kind==='text')
+    return `<div class="tr-node"><span class="tr-tt" style="font-style:italic">${esc(t.text||'Untitled track')}</span><span class="ts-notlib">not in library</span></div>`;
+  const chips=transTreeChips(t.bpm,t.musical_key);
+  const tryBadge=edge.status==='to_try'?' <span class="tr-flag tr-try" title="Marked to try — untested live">🧪 to try</span>':'';
+  const visit=t.revisit?' <span class="tr-flag tr-visit" title="Already on this path — stopping here">↺ visited</span>':'';
+  const cut=t.truncated?' <span class="tr-flag tr-visit" title="Too many stops — showing the first 60">…</span>':'';
+  const mash=edge.is_mashup_track?' <span class="ts-mash">⇄ Mashup</span>':'';
+  const mashIn=edge.is_mashup_track
+    ? `<div class="ts-mi">in: ${edge.mashup_input_song_id
+        ? `<span class="ts-click" title="Jump to this song" onclick="event.stopPropagation();jumpToSong(${edge.mashup_input_song_id})">${esc(edge.mashup_input_title||'?')}</span><span class="ts-artist">— ${esc(edge.mashup_input_artist||'?')}</span>`
+        : `<span class="ts-mi-plain">${esc(edge.mashup_input_text||'?')}</span><span class="ts-notlib">not in library</span>`}</div>`
+    : '';
+  const kids=(t.children||[]);
+  const head=`<span class="tr-tt">${esc(t.title||t.filename||'Untitled')}
+      <span class="tr-art">— ${esc(t.artist||'—')}</span></span>
+    ${chips}${mash}${tryBadge}${visit}${cut}`;
+  if(!kids.length){
+    const leaf=t.id!=null
+      ? `<button class="tr-node topline" title="Jump to this song" onclick="jumpToSong(${t.id})">${head}</button>`
+      : `<div class="tr-node topline">${head}</div>`;
+    // Frontier stop: the depth limit hid onward mixes, so offer this branch's
+    // deeper hops in place instead of a false dead end.
+    const more=(t.has_more&&t.id!=null)?`<div class="tr-more" data-more="${t.id}"><button onclick="expandTransTreeBranch(${t.id},${level},this)" title="Load the next hops from this stop">Show deeper ↓</button></div>`:'';
+    return leaf+(mashIn?`<div style="margin:2px 0 4px">${mashIn}</div>`:'')+more;
+  }
+  // Branch stops use a plain row inside <summary> (a <button> in a <summary>
+  // double-fires: one click would both jump and toggle). The title span jumps;
+  // the caret area toggles the branch.
+  const row=t.id!=null
+    ? `<div class="tr-node topline"><span class="tr-caret" aria-hidden="true">▾</span><span class="tr-tt tr-jump" role="link" tabindex="0" title="Jump to this song" onclick="event.stopPropagation();jumpToSong(${t.id})" onkeydown="if(event.key==='Enter'){event.stopPropagation();jumpToSong(${t.id})}">${esc(t.title||t.filename||'Untitled')} <span class="tr-art">— ${esc(t.artist||'—')}</span></span>
+      ${chips}${mash}${tryBadge}${visit}${cut}</div>`
+    : `<div class="tr-node topline"><span class="tr-caret" aria-hidden="true">▾</span>${head}</div>`;
+  const inner=kids.map(c=>transTreeEdgeHtml(c,level+1)).join('');
+  const omitted=transTreeOmittedHtml(t.omitted,kids.length);
+  return `<details class="tr-branch"${t.id!=null?` data-node="${t.id}"`:''} open><summary>${row}</summary>${mashIn?`<div style="margin:2px 0 0">${mashIn}</div>`:''}<div class="tr-kids">${inner}${omitted}</div></details>`;
 }
 
 // Shared name/link builder for a mashup ingredient (input song or typed text).
